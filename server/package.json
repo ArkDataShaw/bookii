@@ -1,0 +1,15 @@
+{
+  "name": "bookii-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node db.js migrate"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "hono": "^4.6.0",
+    "pg": "^8.13.0"
+  }
+}
