@@ -6,3 +6,9 @@
   from = "/api/slots"
   to = "/.netlify/functions/slots"
   status = 200
+
+# from.bookii.to — clean public booking URLs (from.bookii.to/username/slug)
+[[redirects]]
+  from = "https://from.bookii.to/*"
+  to = "/app.html"
+  status = 200

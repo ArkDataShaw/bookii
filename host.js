@@ -57,7 +57,17 @@
     window.scrollTo(0, 0);
   }
 
+  const PUB_HOST = location.hostname === "from.bookii.to";
   async function route() {
+    // from.bookii.to/username[/slug] — clean path-based public routes
+    if (PUB_HOST) {
+      const p = location.pathname.split("/").filter(Boolean);
+      const h = location.hash.replace(/^#\//, "").split("/").filter(Boolean);
+      if (h[0] === "cancel" && h[1] && h[2]) return renderCancel(h[1], h[2]);
+      if (p[0] && p[1]) return renderPublic(p[0], p[1]);
+      if (p[0]) return renderProfile(p[0]);
+      location.href = "https://bookii.to/"; return;
+    }
     const h = location.hash.replace(/^#\//, "");
     const parts = h.split("/").filter(Boolean);
     // public routes
@@ -164,9 +174,9 @@
   /* ---------- dashboard ---------- */
   async function renderDashboard() {
     $("#userchip-name").textContent = me.name || me.email;
-    const pageUrl = `${location.origin}/app.html#/u/${me.username}`;
+    const pageUrl = `https://from.bookii.to/${me.username}`;
     const link = $("#dash-pagelink");
-    link.textContent = `bookii.to/u/${me.username}`;
+    link.textContent = `from.bookii.to/${me.username}`;
     link.href = pageUrl;
     show("dashboard");
     const { eventTypes } = await api("/event-types");
@@ -176,14 +186,14 @@
       list.innerHTML = '<p class="et-empty">No event types yet — create your first.</p>';
     }
     for (const et of eventTypes) {
-      const url = `${location.origin}/app.html#/u/${me.username}/${et.slug}`;
+      const url = `https://from.bookii.to/${me.username}/${et.slug}`;
       const el = document.createElement("div");
       el.className = "et-card";
       el.style.borderLeftColor = et.color;
       el.innerHTML = `
         <div class="et-info">
           <p class="et-title">${esc(et.title)} <span class="et-badge">${et.duration_min} min</span>${et.hidden ? '<span class="et-badge">hidden</span>' : ""}</p>
-          <p class="et-link">bookii.to/u/${esc(me.username)}/${esc(et.slug)}</p>
+          <p class="et-link">from.bookii.to/${esc(me.username)}/${esc(et.slug)}</p>
         </div>
         <div class="et-actions">
           <button class="btn btn-ghost btn-sm" data-act="copy">Copy link</button>
@@ -198,7 +208,7 @@
     }
   }
   $("#dash-copy-page").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(`${location.origin}/app.html#/u/${me.username}`).catch(() => {});
+    await navigator.clipboard.writeText(`https://from.bookii.to/${me.username}`).catch(() => {});
     $("#dash-copied").hidden = false;
     setTimeout(() => { $("#dash-copied").hidden = true; }, 1500);
   });
@@ -234,7 +244,7 @@
     $("#ed-heading").textContent = ed.title;
     $("#ed-title").value = ed.title;
     $("#ed-slug").value = ed.slug;
-    $("#ed-slug-prefix").textContent = `bookii.to/u/${me.username}/`;
+    $("#ed-slug-prefix").textContent = `from.bookii.to/${me.username}/`;
     $("#ed-desc").value = ed.description;
     selOptions($("#ed-schedule"), schedules.map(s => [s.id, s.name + (s.is_default ? " (default)" : "")]), ed.schedule_id);
     const mins = [["0", "None"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"], ["30", "30 min"]];
