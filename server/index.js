@@ -11,7 +11,7 @@ const app = new Hono();
 app.use("*", cors({
   origin: (o) => {
     if (!o) return "*";
-    if (/^https?:\/\/(localhost(:\d+)?|bookii\.to|www\.bookii\.to|bookii-696\.netlify\.app)$/.test(o)) return o;
+    if (/^https?:\/\/((localhost|127\.0\.0\.1)(:\d+)?|bookii\.to|www\.bookii\.to|bookii-696\.netlify\.app)$/.test(o)) return o;
     return "https://bookii.to";
   },
   allowHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
