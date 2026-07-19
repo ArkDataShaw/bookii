@@ -59,14 +59,16 @@
 
   const PUB_HOST = location.hostname === "from.bookii.to";
   async function route() {
-    // from.bookii.to/username[/slug] — clean path-based public routes
+    // from.bookii.to — the app lives at the root; /username[/slug] are public booking pages
     if (PUB_HOST) {
       const p = location.pathname.split("/").filter(Boolean);
       const h = location.hash.replace(/^#\//, "").split("/").filter(Boolean);
       if (h[0] === "cancel" && h[1] && h[2]) return renderCancel(h[1], h[2]);
-      if (p[0] && p[1]) return renderPublic(p[0], p[1]);
-      if (p[0]) return renderProfile(p[0]);
-      location.href = "https://bookii.to/"; return;
+      if (p[0] && p[0] !== "app.html") {
+        if (p[1]) return renderPublic(p[0], p[1]);
+        return renderProfile(p[0]);
+      }
+      // no path → fall through to the normal app (auth/dashboard) routing
     }
     const h = location.hash.replace(/^#\//, "");
     const parts = h.split("/").filter(Boolean);
