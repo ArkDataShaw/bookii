@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookii — your page</title>
+<meta name="description" content="Create booking pages people actually like. Event types, schedules, multi-calendar.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232C41E8'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='Georgia'>b</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+  <nav class="topnav" id="app-nav" aria-label="App" hidden>
+    <a href="#/dashboard" data-nav="dashboard">Event types</a>
+    <a href="#/availability" data-nav="availability">Availability</a>
+    <a href="#/meetings" data-nav="meetings">Meetings</a>
+    <a href="#/calendars" data-nav="calendars">Calendars</a>
+  </nav>
+  <div class="userchip" id="userchip" hidden>
+    <span id="userchip-name"></span>
+    <button class="linklike" id="logout">Sign out</button>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- AUTH -->
+  <section id="view-auth" class="view view-narrow" hidden>
+    <div class="card auth-card">
+      <h1 class="serif" id="auth-title">Create your page</h1>
+      <p class="mut" id="auth-sub">Booking pages people actually like. Free while in beta.</p>
+      <form id="auth-form">
+        <label id="auth-name-wrap">Your name<input type="text" id="a-name" autocomplete="name" placeholder="Shaw Cole"></label>
+        <label>Email<input type="email" id="a-email" required autocomplete="email" placeholder="you@company.com"></label>
+        <label>Password<input type="password" id="a-password" required minlength="8" autocomplete="new-password" placeholder="8+ characters"></label>
+        <p class="form-error" id="auth-error" hidden></p>
+        <button class="btn btn-primary btn-wide" id="auth-submit" type="submit">Sign up</button>
+      </form>
+      <p class="auth-switch"><span id="auth-switch-label">Already have an account?</span>
+      <button class="linklike" id="auth-switch">Sign in</button></p>
+    </div>
+  </section>
+
+  <!-- ONBOARDING -->
+  <section id="view-onboarding" class="view view-narrow" hidden>
+    <div class="card">
+      <p class="eyebrow">One minute of setup</p>
+      <h1 class="serif">Claim your link</h1>
+      <label class="slug-claim">bookii.to/u/<input type="text" id="ob-username" placeholder="yourname" autocomplete="off" spellcheck="false">
+        <span class="slug-status" id="ob-status"></span></label>
+      <label>A welcome line for your page <span class="opt">optional</span>
+        <input type="text" id="ob-welcome" placeholder="“Grab any time that works — happy to talk.”" maxlength="300"></label>
+      <label>Your timezone
+        <select id="ob-tz"></select></label>
+      <p class="mut">We'll start you with <strong>Mon–Fri, 9:00–17:00</strong> availability and two starter event types — everything's editable after.</p>
+      <p class="form-error" id="ob-error" hidden></p>
+      <button class="btn btn-primary btn-wide" id="ob-go">Create my page →</button>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" class="view" hidden>
+    <div class="pagehead">
+      <div>
+        <h1 class="serif">Event types</h1>
+        <p class="mut">Your page: <a id="dash-pagelink" target="_blank" rel="noopener"></a>
+          <button class="linklike" id="dash-copy-page">copy</button><span class="copied" id="dash-copied" hidden>copied</span></p>
+      </div>
+      <button class="btn btn-primary" id="dash-new">+ New event type</button>
+    </div>
+    <div id="dash-list" class="et-list"></div>
+  </section>
+
+  <!-- EVENT EDITOR -->
+  <section id="view-editor" class="view" hidden>
+    <div class="pagehead">
+      <div>
+        <p class="eyebrow"><a href="#/dashboard">← Event types</a></p>
+        <h1 class="serif" id="ed-heading">Edit event</h1>
+      </div>
+      <div class="pagehead-actions">
+        <span class="save-state" id="ed-savestate"></span>
+        <button class="btn btn-primary" id="ed-save">Save</button>
+      </div>
+    </div>
+    <div class="editor-grid">
+      <div class="editor-form">
+        <div class="card">
+          <h3 class="card-title">Essentials</h3>
+          <label>Event name<input type="text" id="ed-title" maxlength="80"></label>
+          <label>Link<span class="slug-claim slug-claim-sm"><span id="ed-slug-prefix"></span><input type="text" id="ed-slug" spellcheck="false"></span></label>
+          <label>Duration
+            <div class="dur-row" id="ed-durations"></div></label>
+          <label>Description <span class="opt">shown on your booking page</span>
+            <textarea id="ed-desc" rows="2" maxlength="500"></textarea></label>
+          <label>Where
+            <div class="loc-list" id="ed-locations"></div>
+            <button class="linklike" id="ed-addloc">+ add a location option</button></label>
+          <label>Color
+            <div class="swatches" id="ed-swatches"></div></label>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Scheduling rules</h3>
+          <label>Availability schedule<select id="ed-schedule"></select>
+            <span class="mut small"><a href="#/availability">edit schedules →</a></span></label>
+          <div class="two-col">
+            <label>Buffer before<select id="ed-bufb"></select></label>
+            <label>Buffer after<select id="ed-bufa"></select></label>
+          </div>
+          <div class="two-col">
+            <label>Minimum notice<select id="ed-notice"></select></label>
+            <label>Bookable window<select id="ed-window"></select></label>
+          </div>
+          <div class="two-col">
+            <label>Show slots every<select id="ed-interval"></select></label>
+            <label>Max meetings / day<select id="ed-cap"></select></label>
+          </div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Booking questions <span class="opt">name &amp; email are always asked</span></h3>
+          <div id="ed-questions" class="q-list"></div>
+          <button class="linklike" id="ed-addq">+ add a question</button>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Visibility</h3>
+          <label class="check-row"><input type="checkbox" id="ed-hidden"> Hidden — direct link works, but it won't be listed on your page</label>
+          <button class="linklike danger" id="ed-delete">Delete this event type</button>
+        </div>
+      </div>
+      <aside class="editor-preview">
+        <p class="preview-label">Live preview</p>
+        <div class="preview-frame" id="ed-preview"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- AVAILABILITY -->
+  <section id="view-availability" class="view" hidden>
+    <div class="pagehead">
+      <h1 class="serif">Availability</h1>
+      <button class="btn btn-ghost" id="av-new">+ New schedule</button>
+    </div>
+    <div class="sched-tabs" id="av-tabs"></div>
+    <div class="editor-grid">
+      <div class="card">
+        <div class="sched-head">
+          <input type="text" id="av-name" class="sched-name" maxlength="60">
+          <label class="check-row small"><input type="checkbox" id="av-default"> default</label>
+          <span class="save-state" id="av-savestate"></span>
+          <button class="btn btn-primary btn-sm" id="av-save">Save</button>
+        </div>
+        <label class="av-tz">Timezone<select id="av-tz"></select></label>
+        <div class="week-grid" id="av-week"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Date overrides</h3>
+        <p class="mut small">Specific dates that replace your weekly hours — trips, holidays, one-off openings.</p>
+        <div id="av-overrides" class="ov-list"></div>
+        <div class="ov-add">
+          <input type="date" id="ov-date">
+          <select id="ov-kind"><option value="blocked">Unavailable all day</option><option value="custom">Custom hours</option></select>
+          <span id="ov-custom" hidden><select id="ov-start"></select>–<select id="ov-end"></select></span>
+          <button class="btn btn-ghost btn-sm" id="ov-addbtn">Add</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEETINGS -->
+  <section id="view-meetings" class="view" hidden>
+    <div class="pagehead"><h1 class="serif">Meetings</h1></div>
+    <div id="mt-list" class="host-bookings"></div>
+  </section>
+
+  <!-- CALENDARS -->
+  <section id="view-calendars" class="view" hidden>
+    <div class="pagehead"><h1 class="serif">Connected calendars</h1></div>
+    <p class="mut cal-intro">Bookii reads busy times from every calendar you connect and writes bookings to the one you choose. Connect as many as you are.</p>
+    <div class="prov-grid" id="cal-providers"></div>
+  </section>
+
+  <!-- PUBLIC PROFILE -->
+  <section id="view-profile" class="view view-narrow" hidden>
+    <div class="pub-host" id="pf-host"></div>
+    <div class="et-list" id="pf-list"></div>
+    <p class="pub-foot">powered by <a href="/">bookii</a></p>
+  </section>
+
+  <!-- PUBLIC BOOKING -->
+  <section id="view-public" class="view" hidden>
+    <div class="bookpage" id="pub-page">
+      <aside class="book-host">
+        <div class="host-avatar" id="pb-avatar" aria-hidden="true"></div>
+        <p class="host-name serif" id="pb-hostname"></p>
+        <p class="host-welcome" id="pb-welcome"></p>
+        <h2 class="event-title serif" id="pb-title"></h2>
+        <p class="mut" id="pb-desc"></p>
+        <div class="event-meta" id="pb-meta"></div>
+        <div class="tz-picker">
+          <label for="pb-tz">Times shown in</label>
+          <select id="pb-tz"></select>
+        </div>
+      </aside>
+      <div class="book-cal">
+        <div class="cal-head">
+          <button class="cal-nav" id="pb-prev" aria-label="Previous month">‹</button>
+          <p class="cal-month serif" id="pb-month"></p>
+          <button class="cal-nav" id="pb-next" aria-label="Next month">›</button>
+        </div>
+        <div class="cal-grid" id="pb-grid" role="grid"></div>
+      </div>
+      <div class="book-slots">
+        <p class="slots-date serif" id="pb-date">Pick a day</p>
+        <div class="slots-list" id="pb-slots"></div>
+      </div>
+    </div>
+
+    <div class="sheet-backdrop" id="pb-backdrop" hidden></div>
+    <div class="sheet" id="pb-sheet" role="dialog" aria-modal="true" hidden>
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <p class="sheet-time serif" id="pb-sheettime"></p>
+      <p class="sheet-tzline" id="pb-tzline"></p>
+      <form id="pb-form">
+        <label>Your name<input type="text" id="pb-name" required autocomplete="name"></label>
+        <label>Email<input type="email" id="pb-email" required autocomplete="email"></label>
+        <div id="pb-questions"></div>
+        <div id="pb-locpick"></div>
+        <p class="form-error" id="pb-error" hidden></p>
+        <button class="btn btn-primary btn-wide" type="submit" id="pb-confirm">Confirm booking</button>
+        <button class="linklike sheet-cancel" type="button" id="pb-close">Never mind</button>
+      </form>
+    </div>
+
+    <div class="confirmed" id="pb-confirmed" hidden>
+      <div class="confirmed-card">
+        <p class="confirmed-mark" aria-hidden="true">✓</p>
+        <h2 class="serif">It's done.</h2>
+        <p class="confirmed-when" id="pb-when"></p>
+        <p class="confirmed-tz" id="pb-whentz"></p>
+        <div class="confirmed-actions">
+          <button class="btn btn-ghost" id="pb-ics">Add to calendar (.ics)</button>
+          <a class="linklike" id="pb-cancel-link">Cancel this booking</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CANCEL -->
+  <section id="view-cancel" class="view view-narrow" hidden>
+    <div class="card" style="text-align:center">
+      <h1 class="serif">Cancel booking</h1>
+      <p class="mut" id="cx-msg">Are you sure you want to cancel?</p>
+      <button class="btn btn-primary" id="cx-btn">Yes, cancel it</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" hidden></div>
+</main>
+
+<script src="host.js"></script>
+</body>
+</html>
