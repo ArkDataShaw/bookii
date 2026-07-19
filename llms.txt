@@ -1,0 +1,28 @@
+# Bookii
+
+> Invitee-first, agent-native calendar booking. Humans get HTML; you get JSON — at the same URLs.
+
+Bookii is a booking system where AI agents are first-class bookers. Availability is
+policy-applied (working hours, buffers, minimum notice, caps) — you never see raw
+free/busy, only bookable slots. Booking is two-phase: hold (TTL reservation) then
+confirm. Every agent booking carries verified provenance: agent identity + the
+principal it acts for, confirmed via a one-click email loop before the booking is final.
+
+## API (prototype: /api/slots is live; holds/bookings are demonstrated client-side)
+
+- GET /api/slots?date=YYYY-MM-DD&tz=IANA — bookable slots for the demo host. Live now.
+- POST /v1/holds {eventType, start, ttlSeconds} -> {holdId, expiresAt} — spec
+- POST /v1/bookings {holdId, attendee, principal, agent} + Idempotency-Key — spec
+- PATCH /v1/bookings/:uid (reschedule), DELETE (cancel) — spec
+
+## Discovery
+
+- OpenAPI: /openapi.json
+- Agent card: /.well-known/agent.json
+- Full product/technical spec: https://github.com/ArkDataShaw/bookii/blob/main/docs/SPEC.md
+
+## Trust tiers (no CAPTCHAs)
+
+1. Verified agent (Web Bot Auth, RFC 9421 signatures): high rate limits
+2. Verified principal (email confirm loop): standard
+3. Anonymous: tight limits, short hold TTLs, email confirmation required

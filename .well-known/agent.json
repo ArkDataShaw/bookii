@@ -1,0 +1,21 @@
+{
+  "name": "Bookii",
+  "description": "Invitee-first, agent-native calendar booking. Query policy-applied availability, place TTL holds, confirm bookings with verified principal identity.",
+  "url": "https://bookii.netlify.app",
+  "version": "0.1.0-prototype",
+  "capabilities": ["availability.query", "slots.hold", "bookings.create", "bookings.reschedule", "bookings.cancel", "proposals.mutual"],
+  "endpoints": {
+    "slots": { "method": "GET", "url": "/api/slots", "params": { "date": "YYYY-MM-DD", "tz": "IANA timezone" }, "live": true },
+    "openapi": "/openapi.json",
+    "llms": "/llms.txt"
+  },
+  "auth": {
+    "tiers": [
+      { "tier": 1, "name": "verified-agent", "mechanism": "web-bot-auth (RFC 9421)", "rateLimit": "300/min" },
+      { "tier": 2, "name": "verified-principal", "mechanism": "principal email confirm loop", "rateLimit": "60/min" },
+      { "tier": 3, "name": "anonymous", "mechanism": "none", "rateLimit": "10/min" }
+    ]
+  },
+  "provenance": "Every agent booking records {agent.name, agent.operator, principal.email, principal.confirmed} and displays it to the host.",
+  "spec": "https://github.com/ArkDataShaw/bookii/blob/main/docs/SPEC.md"
+}

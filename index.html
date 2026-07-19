@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookii — the booking page both of you will like</title>
+<meta name="description" content="Bookii is an invitee-first, agent-native calendar booking system. Humans and AI agents book against the same live availability.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232C41E8'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='Georgia'>b</text></svg>">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"Bookii",
+ "potentialAction":{"@type":"ReserveAction","target":{"@type":"EntryPoint",
+ "urlTemplate":"/api/slots?date={date}","contentType":"application/json"}}}
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="wordmark" href="#/">bookii<span class="wordmark-dot">.</span></a>
+  <nav class="topnav" aria-label="Demo views">
+    <a href="#/book" data-nav="book">Invitee</a>
+    <a href="#/agent" data-nav="agent">Agent console</a>
+    <a href="#/host" data-nav="host">Host</a>
+    <a href="#/proposal" data-nav="proposal">Mutual</a>
+  </nav>
+  <a class="topbar-spec" href="https://github.com/ArkDataShaw/bookii/blob/main/docs/SPEC.md" target="_blank" rel="noopener">Spec</a>
+</header>
+
+<main id="app">
+
+  <!-- ============ LANDING ============ -->
+  <section id="view-landing" class="view">
+    <div class="hero">
+      <p class="eyebrow">A working prototype · humans &amp; agents share one calendar truth</p>
+      <h1 class="hero-title">The booking page<br><em>both of you</em> will like.</h1>
+      <p class="hero-sub">Invitee-first. Multi-calendar. Agent-native. Watch an AI assistant and a human
+      book against the same live availability — with slot holds arbitrating in real time.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#/book">Book with Shaw →</a>
+        <a class="btn btn-ghost" href="#/agent">Open the agent console</a>
+      </div>
+      <div class="hero-scene" id="hero-scene" aria-hidden="true">
+        <!-- miniature live slot strip rendered by app.js -->
+      </div>
+    </div>
+
+    <div class="pillars">
+      <div class="pillar">
+        <h3>A conversation, not a kiosk</h3>
+        <p>Overlay your own calendar on the host's page. Preferred times read as suggestions.
+        Timezones are confirmed for <em>both</em> people, unmissably.</p>
+      </div>
+      <div class="pillar">
+        <h3>Every calendar you are</h3>
+        <p>Google, Microsoft, iCloud, CalDAV, ICS — read busy from all of them, write to the one you choose,
+        mirror privacy-masked holds between them.</p>
+      </div>
+      <div class="pillar">
+        <h3>Agents are first-class</h3>
+        <p>The same URL serves humans HTML and agents JSON. Two-phase holds make agent booking race-free.
+        Provenance — “held by Claude · confirmed by jane@acme.com” — is visible to the host.</p>
+      </div>
+    </div>
+
+    <div class="landing-machine">
+      <p class="eyebrow">For your agent, right now</p>
+      <pre class="codeline"><code>curl https://bookii.netlify.app/api/slots?date=<span id="curl-date"></span>&amp;tz=America/Chicago</code></pre>
+      <p class="mut">Also: <a href="/.well-known/agent.json">/.well-known/agent.json</a> · <a href="/llms.txt">/llms.txt</a> · <a href="/openapi.json">/openapi.json</a></p>
+    </div>
+  </section>
+
+  <!-- ============ BOOKING (invitee) ============ -->
+  <section id="view-book" class="view" hidden>
+    <div class="bookpage">
+      <aside class="book-host">
+        <div class="host-avatar" aria-hidden="true">SC</div>
+        <p class="host-name serif">Shaw Cole</p>
+        <p class="host-welcome">“Grab any time that works — or connect your calendar below and we’ll find where we’re both free.”</p>
+        <h2 class="event-title serif">Intro call</h2>
+        <div class="event-meta">
+          <span class="chip">30 min</span>
+          <span class="chip">Google Meet</span>
+          <span class="chip chip-alt">or phone</span>
+        </div>
+        <div class="tz-picker">
+          <label for="tz-select">Times shown in</label>
+          <select id="tz-select"></select>
+        </div>
+        <div class="overlay-box" id="overlay-box">
+          <button class="btn btn-overlay" id="overlay-connect">
+            <span class="dot-google" aria-hidden="true"></span> See your calendar on this page
+          </button>
+          <p class="overlay-note">Free/busy only · only you see it · discarded after booking</p>
+        </div>
+        <div class="overlay-active" id="overlay-active" hidden>
+          <span class="overlay-pill">Your calendar is on this page</span>
+          <label class="bothfree"><input type="checkbox" id="both-free"> Only show times we’re <strong>both</strong> free</label>
+          <button class="linklike" id="overlay-disconnect">Disconnect</button>
+        </div>
+      </aside>
+
+      <div class="book-cal">
+        <div class="cal-head">
+          <button class="cal-nav" id="cal-prev" aria-label="Previous month">‹</button>
+          <p class="cal-month serif" id="cal-month"></p>
+          <button class="cal-nav" id="cal-next" aria-label="Next month">›</button>
+        </div>
+        <div class="cal-grid" id="cal-grid" role="grid" aria-label="Choose a day"></div>
+        <p class="cal-legend"><span class="lg lg-open"></span> open <span class="lg lg-pref"></span> works best <span class="lg lg-held"></span> being held <span class="lg lg-ghost"></span> your busy</p>
+      </div>
+
+      <div class="book-slots" id="book-slots">
+        <p class="slots-date serif" id="slots-date">Pick a day</p>
+        <div class="slots-list" id="slots-list"></div>
+      </div>
+    </div>
+
+    <!-- booking sheet (form) -->
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+    <div class="sheet" id="book-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-time" hidden>
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <p class="sheet-time serif" id="sheet-time"></p>
+      <p class="sheet-tzline" id="sheet-tzline"></p>
+      <form id="book-form">
+        <label>Your name<input type="text" id="f-name" required autocomplete="name" placeholder="Ana Ribeiro"></label>
+        <label>Email<input type="email" id="f-email" required autocomplete="email" placeholder="ana@acme.com"></label>
+        <label>Anything Shaw should know? <span class="opt">optional</span><textarea id="f-note" rows="2" placeholder="Context, links, agenda…"></textarea></label>
+        <button class="btn btn-primary btn-wide" type="submit">Confirm booking</button>
+        <button class="linklike sheet-cancel" type="button" id="sheet-close">Never mind</button>
+      </form>
+    </div>
+
+    <!-- confirmed state -->
+    <div class="confirmed" id="confirmed" hidden>
+      <div class="confirmed-card">
+        <p class="confirmed-mark" aria-hidden="true">✓</p>
+        <h2 class="serif">It’s done.</h2>
+        <p class="confirmed-when" id="confirmed-when"></p>
+        <p class="confirmed-tz" id="confirmed-tz"></p>
+        <div class="confirmed-actions">
+          <button class="btn btn-ghost" id="add-ics">Add to calendar (.ics)</button>
+          <button class="linklike" id="confirmed-back">Back to the page</button>
+        </div>
+        <p class="mut">A confirmation email would arrive from shaw@shawcole.com — your domain, not ours.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ AGENT CONSOLE ============ -->
+  <section id="view-agent" class="view" hidden>
+    <div class="agent-wrap">
+      <div class="agent-head">
+        <h2 class="serif">Agent console</h2>
+        <p class="mut">A real agent session against the same availability engine the human page uses.
+        Open <a href="#/book" target="_blank" rel="noopener">the booking page in a second window</a> and watch the hold appear.</p>
+        <div class="agent-controls">
+          <button class="btn btn-primary" id="agent-run">Run: “Book 30 min with Shaw this week”</button>
+          <button class="btn btn-ghost" id="agent-reset">Reset demo state</button>
+        </div>
+      </div>
+      <div class="console" id="console" aria-live="polite">
+        <div class="console-hint">▸ The transcript below is generated live — every request hits the engine and every response is real.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOST STRIP ============ -->
+  <section id="view-host" class="view" hidden>
+    <div class="host-wrap">
+      <div class="host-top">
+        <div>
+          <h2 class="serif">Good morning, Shaw</h2>
+          <p class="mut" id="host-date"></p>
+        </div>
+        <div class="showrate">
+          <p class="showrate-num" id="showrate-num">94%</p>
+          <p class="showrate-lbl">show rate · 30 days</p>
+        </div>
+      </div>
+
+      <h3 class="host-section">Today &amp; upcoming</h3>
+      <div id="host-bookings" class="host-bookings"></div>
+
+      <h3 class="host-section">Copy availability</h3>
+      <div class="copyavail">
+        <p class="mut">Plain text for email or DM — with a live booking link as a fallback.</p>
+        <pre class="copyavail-pre" id="copyavail-pre"></pre>
+        <button class="btn btn-ghost" id="copyavail-btn">Copy to clipboard</button>
+        <span class="copied" id="copied-flag" hidden>Copied</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MUTUAL MODE ============ -->
+  <section id="view-proposal" class="view" hidden>
+    <div class="prop-wrap">
+      <p class="eyebrow">Mutual mode</p>
+      <h2 class="serif">Shaw proposed three times.<br>First confirm wins.</h2>
+      <p class="mut">No “get in line at my kiosk.” Either side proposes; the other taps once.
+      The moment one time is confirmed, the other holds auto-retract.</p>
+      <div class="prop-card" id="prop-card"></div>
+      <button class="linklike" id="prop-reset">Reset proposal</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p><span class="serif">bookii</span> — prototype · <a href="https://github.com/ArkDataShaw/bookii" target="_blank" rel="noopener">source</a> · <a href="https://github.com/ArkDataShaw/bookii/blob/main/docs/SPEC.md" target="_blank" rel="noopener">full spec</a> · availability, holds and bookings are simulated locally; <code>/api/slots</code> is live</p>
+</footer>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
