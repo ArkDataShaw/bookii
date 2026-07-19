@@ -7,7 +7,13 @@
   to = "/.netlify/functions/slots"
   status = 200
 
-# from.bookii.to — clean public booking URLs (from.bookii.to/username/slug)
+# from.bookii.to — the app at the root (force past index.html), public pages at /username[/slug]
+[[redirects]]
+  from = "https://from.bookii.to/"
+  to = "/app.html"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "https://from.bookii.to/*"
   to = "/app.html"
