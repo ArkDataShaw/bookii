@@ -5,7 +5,7 @@
     "version": "0.1.0-prototype",
     "description": "Agent-native booking API. In this prototype, GET /api/slots is live (Netlify Function over the shared availability engine); holds and bookings are demonstrated client-side and specified here for the full build."
   },
-  "servers": [{ "url": "https://bookii.netlify.app" }],
+  "servers": [{ "url": "https://bookii-696.netlify.app" }],
   "paths": {
     "/api/slots": {
       "get": {
