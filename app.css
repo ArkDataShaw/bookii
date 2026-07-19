@@ -25,10 +25,11 @@
 .userchip{margin-left:auto;display:flex;gap:.8rem;align-items:center;font-size:.85rem;color:var(--ink-60)}
 
 /* slug claim */
-.slug-claim{
-  display:flex;align-items:center;gap:0;font-family:var(--font-m);font-size:.95rem;color:var(--ink-60);
+.slug-claim,.card label.slug-claim{
+  display:flex;flex-direction:row;align-items:center;gap:0;font-family:var(--font-m);font-size:.95rem;color:var(--ink-60);
   background:#fff;border:1.5px solid var(--rule);border-radius:9px;padding:.55rem .7rem;font-weight:400;
 }
+.slug-claim .slug-status{margin-left:.5rem;white-space:nowrap}
 .slug-claim input{border:none !important;padding:0 !important;flex:1;font-family:var(--font-m);font-size:.95rem;background:transparent}
 .slug-claim input:focus{outline:none}
 .slug-claim-sm{font-size:.85rem}
