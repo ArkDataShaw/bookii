@@ -1,7 +1,7 @@
 {
   "name": "Bookii",
   "description": "Invitee-first, agent-native calendar booking. Query policy-applied availability, place TTL holds, confirm bookings with verified principal identity.",
-  "url": "https://bookii-696.netlify.app",
+  "url": "https://bookii.to",
   "version": "0.1.0-prototype",
   "capabilities": ["availability.query", "slots.hold", "bookings.create", "bookings.reschedule", "bookings.cancel", "proposals.mutual"],
   "endpoints": {
