@@ -212,7 +212,17 @@ app.post("/v1/event-types", async (c) => {
   if (!u) return err(c, 401, "Sign in required.");
   const b = await c.req.json().catch(() => ({}));
   if (!b.title) return err(c, 400, "Give the event a name.");
+  const slugExplicit = !!b.slug;
   b.slug = b.slug || b.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "meeting";
+  if (!slugExplicit) {
+    // auto-generated slug: suffix until free instead of erroring
+    const base = b.slug;
+    for (let n = 2; n < 50; n++) {
+      const clash = await q(`SELECT 1 FROM event_types WHERE user_id=$1 AND slug=$2`, [u.id, b.slug]);
+      if (!clash.rows.length) break;
+      b.slug = `${base}-${n}`;
+    }
+  }
   const v = await validateEt(c, u, b, null);
   if (v) return err(c, 400, v);
   if (!b.schedule_id) {
