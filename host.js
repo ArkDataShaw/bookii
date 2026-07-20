@@ -51,7 +51,8 @@
     for (const v of VIEWS) $("#view-" + v).hidden = v !== view;
     const appViews = ["dashboard", "editor", "availability", "meetings", "calendars"];
     $("#app-nav").hidden = !appViews.includes(view);
-    $("#userchip").hidden = !me || !appViews.includes(view);
+    $("#userchip").hidden = !me || !(appViews.includes(view) || view === "onboarding");
+    if (me && view === "onboarding") $("#userchip-name").textContent = me.name || me.email;
     document.querySelectorAll("#app-nav a").forEach(a =>
       a.classList.toggle("active", a.dataset.nav === view || (view === "editor" && a.dataset.nav === "dashboard")));
     window.scrollTo(0, 0);
