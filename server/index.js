@@ -413,6 +413,88 @@ app.get("/v1/teams/:id", async (c) => {
   return c.json({ team: { ...team.rows[0], role }, members: members.rows, eventTypes: ets.rows });
 });
 
+app.patch("/v1/teams/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can edit the team.");
+  const b = await c.req.json().catch(() => ({}));
+  if (b.name !== undefined) await q(`UPDATE teams SET name=$1 WHERE id=$2`, [String(b.name).slice(0, 80), c.req.param("id")]);
+  if (b.bio !== undefined) await q(`UPDATE teams SET bio=$1 WHERE id=$2`, [String(b.bio).slice(0, 300), c.req.param("id")]);
+  return c.json({ ok: true });
+});
+
+app.post("/v1/teams/:id/transfer", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  if ((await teamRole(c.req.param("id"), u.id)) !== "owner") return err(c, 403, "Only the owner can transfer ownership.");
+  const { userId } = await c.req.json().catch(() => ({}));
+  if (!(await teamRole(c.req.param("id"), userId))) return err(c, 404, "That person isn't a team member.");
+  await q(`UPDATE team_members SET role='admin' WHERE team_id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
+  await q(`UPDATE team_members SET role='owner' WHERE team_id=$1 AND user_id=$2`, [c.req.param("id"), userId]);
+  return c.json({ ok: true });
+});
+
+app.delete("/v1/teams/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  if ((await teamRole(c.req.param("id"), u.id)) !== "owner") return err(c, 403, "Only the owner can delete the team.");
+  await q(`DELETE FROM teams WHERE id=$1`, [c.req.param("id")]);
+  return c.json({ ok: true });
+});
+
+app.get("/v1/teams/:id/meetings", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  if (!(await teamRole(c.req.param("id"), u.id))) return err(c, 404, "Team not found.");
+  const r = await q(
+    `SELECT b.id, b.start_at, b.end_at, b.status, b.invitee_name, b.invitee_email, b.origin,
+            et.title AS event_title, u.name AS host_name, u.username AS host_username
+     FROM bookings b JOIN event_types et ON et.id=b.event_type_id JOIN users u ON u.id=b.user_id
+     WHERE et.team_id=$1 AND b.start_at > now() - interval '7 days'
+     ORDER BY b.start_at LIMIT 100`, [c.req.param("id")]);
+  return c.json({ meetings: r.rows });
+});
+
+app.get("/v1/teams/:id/host-stats", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  if (!(await teamRole(c.req.param("id"), u.id))) return err(c, 404, "Team not found.");
+  const r = await q(
+    `SELECT tm.user_id, u.name, u.email,
+       (SELECT count(*) FROM schedule_rules sr JOIN schedules s ON s.id=sr.schedule_id WHERE s.user_id=tm.user_id)::int AS rule_count,
+       coalesce((SELECT count(*)::int FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+         WHERE b.user_id=tm.user_id AND et.team_id=$1 AND b.created_at > now() - interval '30 days'
+           AND b.status IN ('pending','confirmed','attended','no_show')), 0) AS bookings_30d,
+       (SELECT max(b.created_at) FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+         WHERE b.user_id=tm.user_id AND et.team_id=$1) AS last_assigned,
+       coalesce((SELECT count(*)::int FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+         WHERE b.user_id=tm.user_id AND et.team_id=$1 AND b.status='attended'), 0) AS attended,
+       coalesce((SELECT count(*)::int FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+         WHERE b.user_id=tm.user_id AND et.team_id=$1 AND b.status='no_show'), 0) AS no_show
+     FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1`, [c.req.param("id")]);
+  const cfg = await q(
+    `SELECT h.event_type_id, h.user_id, h.priority, h.paused FROM event_type_hosts h
+     JOIN event_types et ON et.id=h.event_type_id WHERE et.team_id=$1`, [c.req.param("id")]);
+  return c.json({ hosts: r.rows, hostConfig: cfg.rows });
+});
+
+app.patch("/v1/teams/:id/event-types/:etId/hosts/:userId", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can change hosts.");
+  const b = await c.req.json().catch(() => ({}));
+  const sets = [], vals = [];
+  let i = 1;
+  if (b.paused !== undefined) { sets.push(`paused=$${i++}`); vals.push(!!b.paused); }
+  if (b.priority !== undefined) { sets.push(`priority=$${i++}`); vals.push(Math.max(0, Math.min(4, +b.priority || 0))); }
+  if (!sets.length) return err(c, 400, "Nothing to update.");
+  vals.push(c.req.param("etId"), c.req.param("userId"));
+  await q(`UPDATE event_type_hosts SET ${sets.join(",")} WHERE event_type_id=$${i++} AND user_id=$${i}`, vals);
+  return c.json({ ok: true });
+});
+
 app.post("/v1/teams/:id/members", async (c) => {
   const u = await requireUser(c);
   if (!u) return err(c, 401, "Sign in required.");
@@ -493,7 +575,7 @@ app.get("/v1/pages/team/:slug/:eventSlug", async (c) => {
   if (!t) return err(c, 404, "Page not found.");
   const et = (await q(`SELECT * FROM event_types WHERE team_id=$1 AND slug=$2`, [t.id, c.req.param("eventSlug").toLowerCase()])).rows[0];
   if (!et) return err(c, 404, "Page not found.");
-  const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+  const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1 AND paused=false`, [et.id])).rows.map(r => r.user_id);
   const from = c.req.query("from");
   const fromMs = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? Date.parse(from + "T12:00:00Z") : Date.now();
   const days = Math.min(+(c.req.query("days") || 31), 62);
@@ -858,7 +940,7 @@ app.post("/v1/holds", async (c) => {
   let holdUserId = et.user_id;
   if (et.team_id) {
     // team event: find free hosts at this time, pick one now (hold reserves that host)
-    const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+    const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1 AND paused=false`, [et.id])).rows.map(r => r.user_id);
     const free = await hostsFreeAt(et, hostIds, startMs);
     const need = et.scheduling_type === "collective" ? hostIds.length : 1;
     if (free.length < need) return err(c, 409, "That time is no longer available.");
@@ -903,7 +985,7 @@ app.post("/v1/public-bookings", async (c) => {
     startMs = Date.parse(start || "");
     if (!et || !startMs) return err(c, 400, "eventTypeId and start required (or a holdId).");
     if (et.team_id) {
-      const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+      const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1 AND paused=false`, [et.id])).rows.map(r => r.user_id);
       const free = await hostsFreeAt(et, hostIds, startMs);
       const need = et.scheduling_type === "collective" ? hostIds.length : 1;
       if (free.length < need) return err(c, 409, "That time is no longer available.");

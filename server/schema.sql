@@ -209,3 +209,4 @@ CREATE TABLE IF NOT EXISTS event_type_hosts (
 );
 -- team event slugs must be unique per team (user_id stays the creator)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_et_team_slug ON event_types(team_id, slug) WHERE team_id IS NOT NULL;
+ALTER TABLE event_type_hosts ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;

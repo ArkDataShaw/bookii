@@ -1006,18 +1006,79 @@
     const d = await api("/teams/" + id).catch(() => null);
     if (!d) { location.hash = "#/teams"; return; }
     curTeam = d;
+    const isAdmin = ["owner", "admin"].includes(d.team.role);
     $("#td-name").textContent = d.team.name;
     $("#td-link").innerHTML = `<a href="https://from.bookii.to/team/${esc(d.team.slug)}" target="_blank" rel="noopener">from.bookii.to/team/${esc(d.team.slug)}</a>`;
-    // members
+    $("#td-edit-name").value = d.team.name;
+    $("#td-edit-bio").value = d.team.bio || "";
+
+    // parallel loads
+    const [{ meetings }, stats] = await Promise.all([
+      api(`/teams/${id}/meetings`).catch(() => ({ meetings: [] })),
+      api(`/teams/${id}/host-stats`).catch(() => ({ hosts: [], hostConfig: [] })),
+    ]);
+
+    // team show rate
+    const att = stats.hosts.reduce((a, h) => a + h.attended, 0);
+    const ns = stats.hosts.reduce((a, h) => a + h.no_show, 0);
+    $("#td-showrate").textContent = att + ns > 0 ? Math.round(100 * att / (att + ns)) + "%" : "—";
+
+    // team meetings — who got routed where
+    const mtEl = $("#td-meetings");
+    mtEl.innerHTML = "";
+    const upcoming = meetings.filter(m => m.status !== "cancelled");
+    if (!upcoming.length) mtEl.innerHTML = '<p class="mut small">No team meetings yet — share a team link.</p>';
+    for (const m of upcoming.slice(0, 12)) {
+      const when = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(m.start_at));
+      const row = document.createElement("div");
+      row.className = "bk-card" + (m.origin === "agent" ? " bk-agent" : "");
+      row.innerHTML = `<span class="mt-when">${when}</span>
+        <div style="flex:1"><p class="bk-who">${esc(m.invitee_name)} · ${esc(m.event_title)}</p>
+        <p class="bk-note">→ ${esc(m.host_name || m.host_username)}${m.status !== "confirmed" ? " · " + esc(m.status) : ""}</p></div>`;
+      mtEl.appendChild(row);
+    }
+
+    // availability strip
+    selOptions($("#td-avail-et"), d.eventTypes.map(e => [e.slug, e.title]), d.eventTypes[0]?.slug);
+    renderTeamAvail(d);
+    $("#td-avail-et").onchange = () => renderTeamAvail(d);
+
+    // members with rotation stats + priority + pause (config from first RR event as representative)
     const mEl = $("#td-members");
     mEl.innerHTML = "";
+    const rrEt = d.eventTypes.find(e => e.scheduling_type === "round_robin");
     for (const m of d.members) {
+      const st = stats.hosts.find(h => h.user_id === m.id) || {};
+      const cfg = rrEt ? stats.hostConfig.find(hc => hc.event_type_id === rrEt.id && hc.user_id === m.id) : null;
+      const last = st.last_assigned ? new Date(st.last_assigned).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "never";
+      const noHours = st.rule_count === 0;
       const row = document.createElement("div");
-      row.className = "dk-row";
-      row.innerHTML = `<span class="dk-key">${esc(m.name || m.email)}</span>
-        <span class="dk-meta">${esc(m.email)} · ${esc(m.role)}</span>
-        ${m.role !== "owner" ? '<button class="range-x" aria-label="Remove">×</button>' : ""}`;
-      const x = row.querySelector("button");
+      row.className = "tdm-row" + (cfg?.paused ? " tdm-paused" : "");
+      row.innerHTML = `
+        <div class="tdm-top">
+          <span class="tdm-name">${esc(m.name || m.email)}</span>
+          <span class="et-badge">${esc(m.role)}</span>
+          ${noHours ? '<span class="et-badge tdm-warn">no working hours set</span>' : ""}
+          ${cfg?.paused ? '<span class="et-badge tdm-warn">paused</span>' : ""}
+        </div>
+        <p class="tdm-stats">${st.bookings_30d || 0} bookings · 30d · last assigned ${last}</p>
+        ${isAdmin && cfg ? `<div class="tdm-controls">
+          <label class="check-row small"><input type="checkbox" data-pause ${cfg.paused ? "checked" : ""}> pause rotation</label>
+          <label class="tdm-pri">priority <input type="range" min="0" max="4" value="${cfg.priority}" data-pri></label>
+        </div>` : ""}
+        ${isAdmin && m.role !== "owner" ? '<button class="range-x tdm-x" aria-label="Remove">×</button>' : ""}`;
+      const pause = row.querySelector("[data-pause]");
+      if (pause) pause.addEventListener("change", async () => {
+        await api(`/teams/${id}/event-types/${rrEt.id}/hosts/${m.id}`, { method: "PATCH", body: { paused: pause.checked } }).catch(e => toast(e.message));
+        toast(pause.checked ? "Paused — no new bookings routed here" : "Back in the rotation");
+        renderTeamDetail(id);
+      });
+      const pri = row.querySelector("[data-pri]");
+      if (pri) pri.addEventListener("change", async () => {
+        await api(`/teams/${id}/event-types/${rrEt.id}/hosts/${m.id}`, { method: "PATCH", body: { priority: +pri.value } }).catch(e => toast(e.message));
+        toast("Priority updated");
+      });
+      const x = row.querySelector(".tdm-x");
       if (x) x.addEventListener("click", async () => {
         if (!confirm(`Remove ${m.name || m.email} from the team?`)) return;
         await api(`/teams/${id}/members/${m.id}`, { method: "DELETE" }).catch(e => toast(e.message));
@@ -1025,6 +1086,7 @@
       });
       mEl.appendChild(row);
     }
+
     // host picker for new event
     const hEl = $("#td-et-hosts");
     hEl.innerHTML = "";
@@ -1034,10 +1096,11 @@
       lab.innerHTML = `<input type="checkbox" value="${m.id}" checked> ${esc(m.name || m.email)}`;
       hEl.appendChild(lab);
     }
-    // team event types
+
+    // team event type cards
     const eEl = $("#td-ets");
     eEl.innerHTML = "";
-    if (!d.eventTypes.length) eEl.innerHTML = '<p class="mut small">No team events yet.</p>';
+    if (!d.eventTypes.length) eEl.innerHTML = '<p class="mut small">No team events yet — create one below.</p>';
     for (const et of d.eventTypes) {
       const url = `https://from.bookii.to/team/${d.team.slug}/${et.slug}`;
       const hostNames = (et.host_ids || []).map(hid => {
@@ -1055,7 +1118,6 @@
         <div class="et-actions">
           <button class="btn btn-ghost btn-sm" data-act="copy">Copy link</button>
           <a class="btn btn-ghost btn-sm" href="${url}" target="_blank" rel="noopener">View</a>
-          <a class="btn btn-primary btn-sm" href="#/event/${et.id}">Edit</a>
         </div>`;
       el.querySelector('[data-act=copy]').addEventListener("click", async () => {
         await navigator.clipboard.writeText(url).catch(() => {});
@@ -1063,6 +1125,28 @@
       });
       eEl.appendChild(el);
     }
+  }
+  async function renderTeamAvail(d) {
+    const slug = $("#td-avail-et").value;
+    const el = $("#td-avail");
+    if (!slug) { el.innerHTML = '<p class="mut small">Create a team event first.</p>'; return; }
+    el.innerHTML = '<p class="mut small">Computing…</p>';
+    try {
+      const p = await api(`/pages/team/${d.team.slug}/${slug}?days=7`);
+      let html = "";
+      for (const [day, slots] of Object.entries(p.days)) {
+        const [y, m, dd] = day.split("-").map(Number);
+        const label = new Date(y, m - 1, dd).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        html += `<div class="tda-row"><span class="tda-day">${label}</span>`;
+        if (!slots.length) html += '<span class="tda-none">—</span>';
+        else html += `<span class="tda-slots">${slots.slice(0, 6).map(s => `<span class="scene-slot">${fmtTime(s.start, p.hostTz)}</span>`).join("")}${slots.length > 6 ? `<span class="mut small">+${slots.length - 6}</span>` : ""}</span>`;
+        html += "</div>";
+      }
+      el.innerHTML = html || '<p class="mut small">Nothing bookable this week.</p>';
+      if (Object.values(p.days).every(s => !s.length)) {
+        el.innerHTML += `<p class="ts-note">Nothing bookable — ${p.eventType.schedulingType === "collective" ? "for collective events every host must be free; check each member has working hours" : "check that hosts have working hours set"}.</p>`;
+      }
+    } catch (e) { el.innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
   }
   $("#td-et-create").addEventListener("click", async () => {
     const hosts = [...document.querySelectorAll("#td-et-hosts input:checked")].map(i => i.value);
@@ -1077,6 +1161,33 @@
       toast("Team event created");
       renderTeamDetail(curTeam.team.id);
     } catch (e) { toast(e.message); }
+  });
+  $("#td-edit-save").addEventListener("click", async () => {
+    try {
+      await api("/teams/" + curTeam.team.id, { method: "PATCH", body: {
+        name: $("#td-edit-name").value.trim(),
+        bio: $("#td-edit-bio").value.trim(),
+      }});
+      toast("Saved");
+      renderTeamDetail(curTeam.team.id);
+    } catch (e) { toast(e.message); }
+  });
+  $("#td-transfer").addEventListener("click", async () => {
+    const others = curTeam.members.filter(m => m.role !== "owner");
+    if (!others.length) return toast("No other members to transfer to.");
+    const email = prompt("Transfer ownership to which member? Enter their email:\n" + others.map(m => "· " + m.email).join("\n"));
+    if (!email) return;
+    const target = others.find(m => m.email === email.trim().toLowerCase());
+    if (!target) return toast("No member with that email.");
+    if (!confirm(`Make ${target.name || target.email} the owner? You become an admin.`)) return;
+    await api(`/teams/${curTeam.team.id}/transfer`, { method: "POST", body: { userId: target.id } }).catch(e => toast(e.message));
+    renderTeamDetail(curTeam.team.id);
+  });
+  $("#td-delete").addEventListener("click", async () => {
+    const typed = prompt(`Delete team "${curTeam.team.name}"? This removes its event types and their booking links permanently.\n\nType the team name to confirm:`);
+    if (typed !== curTeam.team.name) { if (typed !== null) toast("Name didn't match."); return; }
+    await api("/teams/" + curTeam.team.id, { method: "DELETE" }).catch(e => toast(e.message));
+    location.hash = "#/teams";
   });
   $("#td-invite").addEventListener("click", async () => {
     try {

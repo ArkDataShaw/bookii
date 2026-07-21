@@ -240,33 +240,61 @@
         <h1 class="serif" id="td-name"></h1>
         <p class="mut" id="td-link"></p>
       </div>
+      <div class="showrate">
+        <p class="showrate-num" id="td-showrate">—</p>
+        <p class="showrate-lbl">team show rate</p>
+      </div>
     </div>
+
+    <div class="et-list" id="td-ets" style="margin-bottom:1.4rem"></div>
+    <div class="card td-new-et-card">
+      <h3 class="card-title">New team event</h3>
+      <div class="td-new-et">
+        <input type="text" id="td-et-title" placeholder="Event name" maxlength="80">
+        <select id="td-et-type">
+          <option value="round_robin">Round robin — one of us takes it</option>
+          <option value="collective">Collective — we all join</option>
+        </select>
+        <select id="td-et-dur"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select>
+        <div id="td-et-hosts" class="td-hosts"></div>
+        <button class="btn btn-primary btn-sm" id="td-et-create">Create</button>
+      </div>
+    </div>
+
     <div class="editor-grid">
       <div>
         <div class="card">
-          <h3 class="card-title">Team event types</h3>
-          <div id="td-ets" class="et-list"></div>
-          <div class="td-new-et">
-            <input type="text" id="td-et-title" placeholder="Event name" maxlength="80">
-            <select id="td-et-type">
-              <option value="round_robin">Round robin — one of us takes it</option>
-              <option value="collective">Collective — we all join</option>
-            </select>
-            <select id="td-et-dur"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select>
-            <div id="td-et-hosts" class="td-hosts"></div>
-            <button class="btn btn-primary btn-sm" id="td-et-create">Create</button>
-          </div>
+          <h3 class="card-title">Team meetings <span class="opt">last 7 days + upcoming</span></h3>
+          <div id="td-meetings" class="host-bookings"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">When are we bookable? <span class="opt">next 7 days</span></h3>
+          <select id="td-avail-et" style="margin-bottom:.7rem"></select>
+          <div id="td-avail"></div>
         </div>
       </div>
-      <div class="card">
-        <h3 class="card-title">Members</h3>
-        <div id="td-members"></div>
-        <div class="dk-new">
-          <input type="email" id="td-invite-email" placeholder="teammate@arkdata.io">
-          <select id="td-invite-role"><option value="member">Member</option><option value="admin">Admin</option></select>
-          <button class="btn btn-ghost btn-sm" id="td-invite">Add</button>
+      <div>
+        <div class="card">
+          <h3 class="card-title">Members &amp; rotation</h3>
+          <div id="td-members"></div>
+          <div class="dk-new">
+            <input type="email" id="td-invite-email" placeholder="teammate@arkdata.io">
+            <select id="td-invite-role"><option value="member">Member</option><option value="admin">Admin</option></select>
+            <button class="btn btn-ghost btn-sm" id="td-invite">Add</button>
+          </div>
+          <p class="mut small">Teammates need a Bookii account first (from.bookii.to).</p>
         </div>
-        <p class="mut small">Teammates need a Bookii account first (from.bookii.to).</p>
+        <div class="card">
+          <h3 class="card-title">Team profile</h3>
+          <label>Name<input type="text" id="td-edit-name" maxlength="80"></label>
+          <label>Bio <span class="opt">shown on your team page</span><textarea id="td-edit-bio" rows="2" maxlength="300"></textarea></label>
+          <button class="btn btn-ghost btn-sm" id="td-edit-save">Save</button>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Danger zone</h3>
+          <button class="linklike" id="td-transfer">Transfer ownership…</button><br>
+          <button class="linklike danger" id="td-delete">Delete this team</button>
+        </div>
       </div>
     </div>
   </section>

@@ -245,3 +245,21 @@
 .td-new-et{display:flex;flex-direction:column;gap:.5rem;margin-top:.8rem;border-top:1px solid var(--rule);padding-top:.9rem}
 .td-new-et input[type=text],.td-new-et select{padding:.55rem .6rem;border-radius:8px;border:1.5px solid var(--rule);background:#fff;font-family:var(--font-b);font-size:.9rem}
 .td-hosts{display:flex;gap:.8rem;flex-wrap:wrap}
+
+/* team detail */
+.tdm-row{position:relative;border-bottom:1px solid var(--rule);padding:.8rem 0}
+.tdm-row:last-child{border-bottom:none}
+.tdm-paused{opacity:.6}
+.tdm-top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.tdm-name{font-weight:600}
+.tdm-warn{background:var(--apricot-soft);color:#B05E1E}
+.tdm-stats{font-family:var(--font-m);font-size:.72rem;color:var(--ink-35);margin:.25rem 0 0}
+.tdm-controls{display:flex;gap:1rem;align-items:center;margin-top:.45rem;flex-wrap:wrap}
+.tdm-pri{display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink-60)}
+.tdm-pri input{width:80px;accent-color:var(--blue)}
+.tdm-x{position:absolute;top:.8rem;right:0}
+.tda-row{display:flex;align-items:center;gap:.7rem;padding:.35rem 0;border-bottom:1px solid var(--rule)}
+.tda-row:last-child{border-bottom:none}
+.tda-day{font-family:var(--font-m);font-size:.72rem;color:var(--ink-60);width:90px;flex-shrink:0}
+.tda-none{color:var(--ink-35)}
+.tda-slots{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center}
