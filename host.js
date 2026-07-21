@@ -215,11 +215,7 @@
     $("#dash-copied").hidden = false;
     setTimeout(() => { $("#dash-copied").hidden = true; }, 1500);
   });
-  $("#dash-new").addEventListener("click", async () => {
-    const r = await api("/event-types", { method: "POST", body: { title: "New meeting", duration_min: 30 } })
-      .catch(e => { toast(e.message); });
-    if (r) location.hash = "#/event/" + r.eventType.id;
-  });
+  $("#dash-new").addEventListener("click", () => { location.hash = "#/event/new"; });
 
   /* ---------- event editor ---------- */
   const COLORS = ["#2C41E8", "#20794D", "#EE8F45", "#B3261E", "#7B4FD8", "#0E7490", "#1B1E28"];
@@ -237,14 +233,27 @@
   }
 
   async function renderEditor(id) {
-    const { eventTypes } = await api("/event-types");
-    ed = eventTypes.find(e => e.id === id);
-    if (!ed) { location.hash = "#/dashboard"; return; }
-    ed.questions = ed.questions || [];
-    ed.locations = ed.locations || [];
     const { schedules } = await api("/schedules");
+    if (id === "new") {
+      // draft — nothing is created until first save
+      ed = {
+        id: null, title: "New meeting", slug: "", description: "", duration_min: 30,
+        color: COLORS[0], locations: ["Google Meet"], buffer_before_min: 0, buffer_after_min: 0,
+        min_notice_min: 240, window_days: 30, slot_interval_min: null, daily_cap: null,
+        questions: [], hidden: false,
+        schedule_id: (schedules.find(s => s.is_default) || schedules[0] || {}).id || null,
+      };
+    } else {
+      const { eventTypes } = await api("/event-types");
+      ed = eventTypes.find(e => e.id === id);
+      if (!ed) { location.hash = "#/dashboard"; return; }
+      ed.questions = ed.questions || [];
+      ed.locations = ed.locations || [];
+    }
+    $("#ed-delete").textContent = ed.id ? "Delete this event type" : "Discard draft";
+    slugTouched = !!ed.id;
     show("editor");
-    $("#ed-heading").textContent = ed.title;
+    $("#ed-heading").textContent = ed.id ? ed.title : "New event type";
     $("#ed-title").value = ed.title;
     $("#ed-slug").value = ed.slug;
     $("#ed-slug-prefix").textContent = `from.bookii.to/${me.username}/`;
@@ -265,7 +274,7 @@
 
   function setDirty(d) {
     edDirty = d;
-    $("#ed-savestate").textContent = d ? "Unsaved changes" : "Saved";
+    $("#ed-savestate").textContent = !ed || !ed.id ? "Not saved yet" : d ? "Unsaved changes" : "Saved";
   }
   function collectEd() {
     return {
@@ -349,6 +358,13 @@
     renderQuestions();
   });
   function onEdit() { setDirty(true); clearTimeout(pvTimer); pvTimer = setTimeout(refreshPreview, 400); }
+  let slugTouched = false;
+  $("#ed-slug").addEventListener("input", () => { slugTouched = true; });
+  $("#ed-title").addEventListener("input", () => {
+    if (ed && !ed.id && !slugTouched) {
+      $("#ed-slug").value = $("#ed-title").value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+    }
+  });
   for (const id of ["ed-title", "ed-slug", "ed-desc", "ed-bufb", "ed-bufa", "ed-notice", "ed-window", "ed-interval", "ed-cap", "ed-hidden", "ed-schedule"]) {
     $("#" + id).addEventListener("input", onEdit);
   }
@@ -362,6 +378,7 @@
       ${d.description ? `<p class="pv-desc">${esc(d.description)}</p>` : ""}
       <div class="event-meta"><span class="chip">${d.duration_min} min</span>${d.locations.filter(Boolean).map(l => `<span class="chip chip-alt">${esc(l)}</span>`).join("")}</div>
       <div class="pv-slots" id="pv-slots"><p class="mut small">Loading live availability…</p></div>`;
+    if (!ed.id) { $("#pv-slots").innerHTML = '<p class="mut small">Live availability appears after the first save.</p>'; return; }
     api(`/pages/${me.username}/${ed.slug}?days=10`).then(p => {
       const el = $("#pv-slots");
       if (!el) return;
@@ -389,7 +406,16 @@
   }
   $("#ed-save").addEventListener("click", async () => {
     try {
-      const r = await api("/event-types/" + ed.id, { method: "PUT", body: collectEd() });
+      const body = collectEd();
+      if (!ed.id) {
+        if (!body.slug) delete body.slug; // let the server auto-generate + suffix
+        const r = await api("/event-types", { method: "POST", body });
+        ed = { ...ed, ...r.eventType };
+        toast("Created");
+        location.hash = "#/event/" + ed.id; // re-enter as a real event
+        return;
+      }
+      const r = await api("/event-types/" + ed.id, { method: "PUT", body });
       ed = { ...ed, ...r.eventType };
       setDirty(false);
       toast("Saved");
@@ -398,6 +424,7 @@
     } catch (e) { toast(e.message); }
   });
   $("#ed-delete").addEventListener("click", async () => {
+    if (!ed.id) { location.hash = "#/dashboard"; return; } // draft: nothing to delete
     if (!confirm("Delete this event type? Its link will stop working.")) return;
     await api("/event-types/" + ed.id, { method: "DELETE" }).catch(e => toast(e.message));
     location.hash = "#/dashboard";
