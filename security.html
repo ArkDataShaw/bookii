@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security — Bookii</title>
+<meta name="description" content="How Bookii protects your data: encryption, access controls, and responsible disclosure.">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legal.css">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+  <a class="topbar-spec" href="https://from.bookii.to/">Sign in</a>
+</header>
+<main class="legal">
+  <h1 class="serif">Security</h1>
+  <p class="legal-meta">Practices as of July 2026 · honest about our stage</p>
+
+  <h2>Encryption</h2>
+  <p>TLS everywhere in transit. Calendar OAuth tokens and connected-account credentials are
+  encrypted at rest with AES-256-GCM using keys held outside the database. Passwords are stored
+  only as salted scrypt hashes.</p>
+
+  <h2>Least access</h2>
+  <p>Calendar connections request the narrowest scopes that work: free/busy reads for
+  availability and event-write for the bookings we create. We never read your event titles,
+  descriptions, or attendees for availability. Databases and caches bind to localhost; the only
+  public surfaces are the website, the app, and the documented API.</p>
+
+  <h2>Booking integrity</h2>
+  <p>Double-bookings are prevented at the database layer (exclusion constraints), not just in
+  application code. All booking mutations support idempotency keys.</p>
+
+  <h2>Infrastructure</h2>
+  <p>API and database on Google Cloud Platform (us-east1); static site and app on Netlify's CDN.
+  Access to production is limited to authorized operators over key-based SSH. See our
+  <a href="/subprocessors.html">subprocessors list</a>.</p>
+
+  <h2>What we don't have yet</h2>
+  <p>We're early, and pretending otherwise would be a red flag: no SOC 2 audit yet, no bug-bounty
+  program (disclosure is welcome, see below), single-region infrastructure. These graduate onto
+  the roadmap as the product grows.</p>
+
+  <h2>Responsible disclosure</h2>
+  <p>Found a vulnerability? Email <a href="mailto:security@bookii.to">security@bookii.to</a>
+  (also published at <a href="/.well-known/security.txt">/.well-known/security.txt</a>). We
+  aim to acknowledge within 3 business days. Good-faith research against your own account is
+  welcome; don't access other users' data, degrade the service, or run automated scanners
+  against production.</p>
+</main>
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/terms.html">terms</a> · <a href="/dpa.html">dpa</a> · <a href="/subprocessors.html">subprocessors</a></p>
+</footer>
+</body>
+</html>

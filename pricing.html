@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing — Bookii</title>
+<meta name="description" content="Bookii pricing: free while in beta. Unlimited event types on every tier, forever. No ads, no hostage-taking.">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legal.css">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<style>
+.price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.2rem;margin:2rem 0}
+.price-card{background:var(--paper-2);border:1px solid var(--rule);border-radius:16px;padding:1.6rem;display:flex;flex-direction:column}
+.price-card.hero-tier{border-color:var(--blue);box-shadow:var(--shadow)}
+.price-name{font-family:var(--font-d);font-weight:600;font-size:1.3rem;margin:0}
+.price-num{font-family:var(--font-d);font-size:2.4rem;font-weight:500;margin:.5rem 0 0}
+.price-num .per{font-family:var(--font-b);font-size:.85rem;color:var(--ink-35)}
+.price-beta{display:inline-block;font-family:var(--font-m);font-size:.68rem;background:var(--leaf-soft);color:var(--leaf);border-radius:999px;padding:.2rem .6rem;font-weight:500;margin:.4rem 0}
+.price-card ul{list-style:none;padding:0;margin:1rem 0;flex:1}
+.price-card li{font-size:.88rem;color:var(--ink-60);padding:.32rem 0;border-bottom:1px solid var(--rule)}
+.price-card li:last-child{border:none}
+.price-card li strong{color:var(--ink)}
+.anti-gates{background:var(--paper-2);border:1px solid var(--rule);border-radius:16px;padding:1.6rem;margin:2.5rem 0}
+.anti-gates h2{margin-top:0 !important}
+.pricing-hero{text-align:center;padding:2.5rem 0 0}
+.pricing-hero h1{font-size:clamp(2.2rem,5vw,3.4rem);margin:.3rem 0 .8rem;letter-spacing:-.02em}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+  <nav class="topnav"><a href="/pricing.html" class="active">Pricing</a><a href="/calendly-alternative.html">vs Calendly</a><a href="/help.html">Help</a></nav>
+  <a class="topbar-spec" href="https://from.bookii.to/">Sign in</a>
+</header>
+
+<main class="legal" style="max-width:900px">
+  <div class="pricing-hero">
+    <p class="eyebrow">Everything is free while we're in beta</p>
+    <h1 class="serif">Pricing that doesn't punish you<br>for being booked.</h1>
+    <p class="mut" style="max-width:32rem;margin:0 auto">These are the tiers Bookii will launch with.
+    Until then, every account gets everything, free. Beta users keep a discount when pricing starts.</p>
+  </div>
+
+  <div class="price-grid">
+    <div class="price-card">
+      <p class="price-name serif">Free</p>
+      <p class="price-num">$0<span class="per"> forever</span></p>
+      <ul>
+        <li><strong>Unlimited event types</strong> — never capped</li>
+        <li><strong>3 connected calendars</strong></li>
+        <li>Email reminders included</li>
+        <li>Reschedule &amp; cancel flows</li>
+        <li>Embeds on your site</li>
+        <li>Agent-ready booking API</li>
+      </ul>
+      <a class="btn btn-ghost" href="https://from.bookii.to/">Start free</a>
+    </div>
+    <div class="price-card hero-tier">
+      <p class="price-name serif">Pro</p>
+      <p class="price-num">$10<span class="per"> /user/mo</span></p>
+      <span class="price-beta">free during beta</span>
+      <ul>
+        <li>Everything in Free, plus</li>
+        <li><strong>Unlimited calendars</strong></li>
+        <li>Custom domain + email from your domain</li>
+        <li>SMS reminders (usage-billed, at cost)</li>
+        <li>Payments on bookings</li>
+        <li>Remove "powered by bookii"</li>
+        <li>Priority human support</li>
+      </ul>
+      <a class="btn btn-primary" href="https://from.bookii.to/">Start free</a>
+    </div>
+    <div class="price-card">
+      <p class="price-name serif">Team</p>
+      <p class="price-num">$16<span class="per"> /user/mo</span></p>
+      <span class="price-beta">free during beta</span>
+      <ul>
+        <li>Everything in Pro, plus</li>
+        <li>Round-robin &amp; collective events</li>
+        <li>Ownership-first routing</li>
+        <li>CRM sync</li>
+        <li><strong>SSO included</strong> — no enterprise cliff</li>
+        <li>Team analytics &amp; show rates</li>
+      </ul>
+      <a class="btn btn-ghost" href="https://from.bookii.to/">Start free</a>
+    </div>
+  </div>
+
+  <div class="anti-gates">
+    <h2 class="serif">Things we will never do</h2>
+    <p>These are commitments, not marketing. They exist because every one of them is a
+    documented reason people leave other scheduling tools.</p>
+    <ul>
+      <li><strong>Never cap event types.</strong> One event type on a free plan is a demo, not a plan.</li>
+      <li><strong>Never show ads to your invitees.</strong> Your booking page is your reputation.</li>
+      <li><strong>Never charge per connected calendar within a tier.</strong> Multiple calendars is an identity, not a usage metric.</li>
+      <li><strong>Never gate reminders.</strong> Reminders are how meetings actually happen.</li>
+      <li><strong>Never surprise-renew.</strong> Renewal reminder emails, one-click cancel, pro-rated refunds.</li>
+      <li><strong>Never dark your booking pages over billing.</strong> If payment fails, your pages stay live while we sort it out — your invitees are never the hostage.</li>
+    </ul>
+  </div>
+</main>
+
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/terms.html">terms</a> · <a href="/help.html">help</a> · <a href="/status.html">status</a> · <a href="/changelog.html">changelog</a></p>
+</footer>
+</body>
+</html>

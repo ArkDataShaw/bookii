@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subprocessors — Bookii</title>
+<meta name="description" content="Third-party subprocessors Bookii uses to provide the service.">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legal.css">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<style>
+.sp-table{width:100%;border-collapse:collapse;font-size:.9rem;margin:1.5rem 0}
+.sp-table th{text-align:left;font-family:var(--font-m);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-35);padding:.5rem .7rem;border-bottom:2px solid var(--ink)}
+.sp-table td{padding:.7rem;border-bottom:1px solid var(--rule);color:var(--ink-60)}
+.sp-table td:first-child{font-weight:600;color:var(--ink)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+</header>
+<main class="legal">
+  <h1 class="serif">Subprocessors</h1>
+  <p class="legal-meta">Last updated July 21, 2026</p>
+  <p>Bookii uses these third parties to provide the service. Each processes data only as needed
+  for its function. We'll update this page before adding a new subprocessor; to get change
+  notifications, email <a href="mailto:privacy@bookii.to">privacy@bookii.to</a> with the subject
+  "subprocessor updates."</p>
+  <table class="sp-table">
+    <thead><tr><th>Provider</th><th>Purpose</th><th>Data</th><th>Location</th></tr></thead>
+    <tbody>
+      <tr><td>Google Cloud Platform</td><td>API hosting &amp; database</td><td>All service data</td><td>United States (us-east1)</td></tr>
+      <tr><td>Netlify</td><td>Website &amp; app hosting, CDN, DNS</td><td>Static assets; request logs</td><td>United States / global CDN</td></tr>
+      <tr><td>Resend</td><td>Transactional email (when enabled)</td><td>Recipient email, booking details in messages</td><td>United States</td></tr>
+      <tr><td>Google (Calendar API)</td><td>Calendar sync, when a host connects Google</td><td>Free/busy intervals; events we create</td><td>Per host's Google account</td></tr>
+    </tbody>
+  </table>
+  <p class="mut">Payment processing (Stripe) will be added here before paid plans launch.</p>
+</main>
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/dpa.html">dpa</a> · <a href="/security.html">security</a></p>
+</footer>
+</body>
+</html>

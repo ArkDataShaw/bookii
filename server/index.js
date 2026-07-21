@@ -7,7 +7,8 @@ import { computeSlots, slotIsAvailable, explainDay } from "./availability.js";
 import { isValidTz } from "./time.js";
 import * as G from "./google.js";
 import { encrypt, signState, verifyState } from "./crypto.js";
-import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails } from "./email.js";
+import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails, sendMagicLink, sendPasswordReset, emailReady } from "./email.js";
+import { randomBytes } from "crypto";
 
 const app = new Hono();
 
@@ -67,6 +68,64 @@ app.post("/v1/auth/login", async (c) => {
   const token = await createSession(u.id);
   const { password_hash, ...user } = u;
   return c.json({ token, user });
+});
+
+/* ---------- email-token auth (magic link + password reset) ---------- */
+async function issueAuthToken(userId, kind) {
+  const token = randomBytes(24).toString("hex");
+  await q(`INSERT INTO auth_tokens (token, user_id, kind, expires_at) VALUES ($1,$2,$3, now() + interval '15 minutes')`, [token, userId, kind]);
+  return token;
+}
+const NEUTRAL = "If that email has an account, a link is on its way.";
+
+app.post("/v1/auth/magic-link", async (c) => {
+  if (!emailReady()) return err(c, 503, "Email sign-in isn't available yet — use your password.");
+  const { email } = await c.req.json().catch(() => ({}));
+  const u = (await q(`SELECT id, email FROM users WHERE email=$1`, [(email || "").toLowerCase()])).rows[0];
+  if (u) {
+    const token = await issueAuthToken(u.id, "magic");
+    sendMagicLink(u.email, `https://from.bookii.to/app.html#/auth-token/${token}`).catch(() => {});
+  }
+  return c.json({ ok: true, message: NEUTRAL });
+});
+
+app.post("/v1/auth/forgot", async (c) => {
+  if (!emailReady()) return err(c, 503, "Password reset by email isn't available yet — contact support@bookii.to.");
+  const { email } = await c.req.json().catch(() => ({}));
+  const u = (await q(`SELECT id, email FROM users WHERE email=$1`, [(email || "").toLowerCase()])).rows[0];
+  if (u) {
+    const token = await issueAuthToken(u.id, "reset");
+    sendPasswordReset(u.email, `https://from.bookii.to/app.html#/reset/${token}`).catch(() => {});
+  }
+  return c.json({ ok: true, message: NEUTRAL });
+});
+
+async function consumeAuthToken(token, kind) {
+  const r = await q(
+    `UPDATE auth_tokens SET used_at=now() WHERE token=$1 AND kind=$2 AND expires_at > now() AND used_at IS NULL RETURNING user_id`,
+    [token || "", kind]);
+  return r.rows[0]?.user_id || null;
+}
+
+app.post("/v1/auth/magic-verify", async (c) => {
+  const { token } = await c.req.json().catch(() => ({}));
+  const userId = await consumeAuthToken(token, "magic");
+  if (!userId) return err(c, 401, "That sign-in link is invalid or expired — request a new one.");
+  const session = await createSession(userId);
+  const u = (await q(`SELECT id, email, name, username, timezone, welcome_note, notify_prefs FROM users WHERE id=$1`, [userId])).rows[0];
+  return c.json({ token: session, user: u });
+});
+
+app.post("/v1/auth/reset", async (c) => {
+  const { token, password } = await c.req.json().catch(() => ({}));
+  if (!password || password.length < 8) return err(c, 400, "Password must be at least 8 characters.");
+  const userId = await consumeAuthToken(token, "reset");
+  if (!userId) return err(c, 401, "That reset link is invalid or expired — request a new one.");
+  await q(`UPDATE users SET password_hash=$1 WHERE id=$2`, [await hashPassword(password), userId]);
+  await q(`DELETE FROM sessions WHERE user_id=$1`, [userId]); // sign out everywhere
+  const session = await createSession(userId);
+  const u = (await q(`SELECT id, email, name, username, timezone, welcome_note, notify_prefs FROM users WHERE id=$1`, [userId])).rows[0];
+  return c.json({ token: session, user: u });
 });
 
 app.get("/v1/me", async (c) => {
@@ -285,6 +344,35 @@ app.delete("/v1/event-types/:id", async (c) => {
   const r = await q(`DELETE FROM event_types WHERE id=$1 AND user_id=$2 RETURNING id`, [c.req.param("id"), u.id]);
   if (!r.rows.length) return err(c, 404, "Event type not found.");
   return c.json({ ok: true });
+});
+
+/* ---------------- billing ---------------- */
+app.get("/v1/billing", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  return c.json({
+    plan: "beta",
+    planLabel: "Beta — everything free",
+    stripeReady: !!process.env.STRIPE_SECRET_KEY,
+    note: "Paid plans launch later; beta users keep a discount. Your booking pages will never go dark over billing.",
+  });
+});
+
+/* ---------------- admin (internal) ---------------- */
+app.get("/v1/admin/lookup", async (c) => {
+  const key = c.req.header("X-Admin-Key");
+  if (!process.env.ADMIN_KEY || key !== process.env.ADMIN_KEY) return err(c, 404, "Not found.");
+  const email = (c.req.query("email") || "").toLowerCase();
+  const uname = (c.req.query("username") || "").toLowerCase();
+  const u = (await q(`SELECT id, email, name, username, timezone, created_at, notify_prefs FROM users WHERE email=$1 OR username=$2 LIMIT 1`, [email, uname])).rows[0];
+  if (!u) return c.json({ found: false });
+  const [ets, scheds, conns, stats] = await Promise.all([
+    q(`SELECT title, slug, hidden, duration_min FROM event_types WHERE user_id=$1`, [u.id]),
+    q(`SELECT name, timezone, is_default FROM schedules WHERE user_id=$1`, [u.id]),
+    q(`SELECT provider, status, account_email, is_destination FROM calendar_connections WHERE user_id=$1`, [u.id]),
+    q(`SELECT status, count(*)::int AS n FROM bookings WHERE user_id=$1 GROUP BY status`, [u.id]),
+  ]);
+  return c.json({ found: true, user: u, eventTypes: ets.rows, schedules: scheds.rows, connections: conns.rows, bookingStats: stats.rows });
 });
 
 /* ---------------- troubleshooter ---------------- */

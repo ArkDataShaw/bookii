@@ -81,6 +81,8 @@
     }
     if (parts[0] === "cancel" && parts[1] && parts[2]) return renderCancel(parts[1], parts[2]);
     if (parts[0] === "reschedule" && parts[1] && parts[2]) return renderReschedule(parts[1], parts[2]);
+    if (parts[0] === "auth-token" && parts[1]) return consumeMagicLink(parts[1]);
+    if (parts[0] === "reset" && parts[1]) return renderResetForm(parts[1]);
     // authed routes
     if (!me) {
       const token = localStorage.getItem("bookii-token");
@@ -104,23 +106,67 @@
   let authMode = "signup";
   function renderAuth(mode) {
     authMode = mode;
-    $("#auth-title").textContent = mode === "signup" ? "Create your page" : "Welcome back";
+    const titles = { signup: "Create your page", login: "Welcome back", reset: "Set a new password" };
+    $("#auth-title").textContent = titles[mode];
     $("#auth-sub").hidden = mode !== "signup";
     $("#auth-name-wrap").hidden = mode !== "signup";
-    $("#auth-submit").textContent = mode === "signup" ? "Sign up" : "Sign in";
+    $("#a-email").parentElement.hidden = mode === "reset";
+    $("#auth-submit").textContent = mode === "signup" ? "Sign up" : mode === "reset" ? "Save password" : "Sign in";
+    $("#auth-alt").hidden = mode !== "login";
+    $("#auth-switch").parentElement.hidden = mode === "reset";
     $("#auth-switch-label").textContent = mode === "signup" ? "Already have an account?" : "New here?";
     $("#auth-switch").textContent = mode === "signup" ? "Sign in" : "Create an account";
     $("#auth-error").hidden = true;
+    $("#auth-info").hidden = true;
     show("auth");
   }
   $("#auth-switch").addEventListener("click", () => renderAuth(authMode === "signup" ? "login" : "signup"));
+  async function consumeMagicLink(token) {
+    show("auth");
+    renderAuth("login");
+    $("#auth-info").textContent = "Signing you in…"; $("#auth-info").hidden = false;
+    try {
+      const data = await api("/auth/magic-verify", { method: "POST", body: { token } });
+      localStorage.setItem("bookii-token", data.token);
+      me = data.user;
+      location.hash = "#/dashboard"; route();
+    } catch (e) {
+      $("#auth-info").hidden = true;
+      $("#auth-error").textContent = e.message; $("#auth-error").hidden = false;
+    }
+  }
+  let resetToken = null;
+  function renderResetForm(token) {
+    resetToken = token;
+    renderAuth("reset");
+  }
+  $("#auth-magic").addEventListener("click", async () => {
+    const email = $("#a-email").value.trim();
+    if (!email) { $("#auth-error").textContent = "Enter your email first."; $("#auth-error").hidden = false; return; }
+    $("#auth-error").hidden = true;
+    try {
+      const r = await api("/auth/magic-link", { method: "POST", body: { email } });
+      $("#auth-info").textContent = r.message; $("#auth-info").hidden = false;
+    } catch (e) { $("#auth-error").textContent = e.message; $("#auth-error").hidden = false; }
+  });
+  $("#auth-forgot").addEventListener("click", async () => {
+    const email = $("#a-email").value.trim();
+    if (!email) { $("#auth-error").textContent = "Enter your email first."; $("#auth-error").hidden = false; return; }
+    $("#auth-error").hidden = true;
+    try {
+      const r = await api("/auth/forgot", { method: "POST", body: { email } });
+      $("#auth-info").textContent = r.message; $("#auth-info").hidden = false;
+    } catch (e) { $("#auth-error").textContent = e.message; $("#auth-error").hidden = false; }
+  });
   $("#auth-form").addEventListener("submit", async e => {
     e.preventDefault();
     $("#auth-error").hidden = true;
     try {
       const body = { email: $("#a-email").value.trim(), password: $("#a-password").value };
       let data;
-      if (authMode === "signup") {
+      if (authMode === "reset") {
+        data = await api("/auth/reset", { method: "POST", body: { token: resetToken, password: body.password } });
+      } else if (authMode === "signup") {
         body.name = $("#a-name").value.trim();
         body.timezone = detectedTz;
         data = await api("/auth/signup", { method: "POST", body });
@@ -735,6 +781,12 @@
     $("#st-n-booked").checked = np.booked !== false;
     $("#st-n-cancelled").checked = np.cancelled !== false;
     $("#st-n-digest").checked = np.digest === true;
+    api("/billing").then(b => {
+      $("#st-billing").innerHTML = `
+        <p style="margin:0 0 .3rem"><span class="prov-state ready">${esc(b.planLabel)}</span></p>
+        <p class="mut small">${esc(b.note)}</p>
+        <p class="mut small"><a href="/pricing.html" target="_blank" rel="noopener">See future pricing →</a></p>`;
+    }).catch(() => {});
   }
   $("#st-username").addEventListener("input", () => {
     const un = $("#st-username").value.trim().toLowerCase();

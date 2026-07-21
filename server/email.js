@@ -54,6 +54,20 @@ async function hostWants(userId, kind) {
   return u;
 }
 
+/* ------- auth emails ------- */
+export async function sendMagicLink(to, url) {
+  return send(to, "Your Bookii sign-in link",
+    layout(`<p style="margin:0 0 8px;font-size:15px">Click to sign in to Bookii. This link works once and expires in 15 minutes.</p>
+      ${btn(url, "Sign in to Bookii")}
+      <p style="font-size:12px;color:#9a9c96;margin-top:16px">If you didn't request this, you can ignore it.</p>`));
+}
+export async function sendPasswordReset(to, url) {
+  return send(to, "Reset your Bookii password",
+    layout(`<p style="margin:0 0 8px;font-size:15px">Click to set a new password. This link works once and expires in 15 minutes.</p>
+      ${btn(url, "Reset password")}
+      <p style="font-size:12px;color:#9a9c96;margin-top:16px">If you didn't request this, your account is safe — ignore this email.</p>`));
+}
+
 /* ------- public API ------- */
 export async function sendBookingEmails(booking, et, hostUserId) {
   const host = (await q(`SELECT email, name, username, timezone, notify_prefs FROM users WHERE id=$1`, [hostUserId])).rows[0];

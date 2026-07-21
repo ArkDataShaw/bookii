@@ -41,8 +41,12 @@
         <label>Email<input type="email" id="a-email" required autocomplete="email" placeholder="you@company.com"></label>
         <label>Password<input type="password" id="a-password" required minlength="8" autocomplete="new-password" placeholder="8+ characters"></label>
         <p class="form-error" id="auth-error" hidden></p>
+        <p class="mut small" id="auth-info" hidden></p>
         <button class="btn btn-primary btn-wide" id="auth-submit" type="submit">Sign up</button>
       </form>
+      <p class="auth-switch" id="auth-alt" hidden>
+        <button class="linklike" id="auth-magic">Email me a sign-in link</button> ·
+        <button class="linklike" id="auth-forgot">Forgot password?</button></p>
       <p class="auth-switch"><span id="auth-switch-label">Already have an account?</span>
       <button class="linklike" id="auth-switch">Sign in</button></p>
     </div>
@@ -232,6 +236,10 @@
       <label class="check-row"><input type="checkbox" id="st-n-cancelled"> When a booking is cancelled or rescheduled</label>
       <label class="check-row"><input type="checkbox" id="st-n-digest"> Daily agenda email</label>
       <p class="mut small">Delivery begins when email sending launches — your preferences are saved now.</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Plan &amp; billing</h3>
+      <div id="st-billing"></div>
     </div>
     <div class="card">
       <h3 class="card-title">Danger zone</h3>

@@ -131,3 +131,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_prefs jsonb NOT NULL DEFAULT '
 ALTER TABLE event_types ADD COLUMN IF NOT EXISTS allow_reschedule boolean NOT NULL DEFAULT true;
 ALTER TABLE event_types ADD COLUMN IF NOT EXISTS allow_cancel     boolean NOT NULL DEFAULT true;
 ALTER TABLE event_types ADD COLUMN IF NOT EXISTS cancel_policy    text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token      text PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind       text NOT NULL CHECK (kind IN ('magic','reset')),
+  expires_at timestamptz NOT NULL,
+  used_at    timestamptz
+);
