@@ -74,7 +74,8 @@ button{font-family:inherit}
 .hero-ctas{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap;margin-bottom:2.6rem}
 
 .btn{
-  display:inline-block;border:none;cursor:pointer;border-radius:999px;
+  display:inline-flex;align-items:center;justify-content:center;line-height:1.2;
+  border:none;cursor:pointer;border-radius:999px;
   padding:.72rem 1.4rem;font-size:.95rem;font-weight:600;transition:transform .12s ease, box-shadow .12s ease;
 }
 .btn:hover{text-decoration:none;transform:translateY(-1px)}

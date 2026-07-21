@@ -54,7 +54,7 @@
 .et-card .et-title{font-weight:600;font-size:1.05rem;margin:0;display:flex;align-items:center;gap:.5rem}
 .et-card .et-link{font-family:var(--font-m);font-size:.78rem;color:var(--ink-60);margin:.15rem 0 0;word-break:break-all}
 .et-badge{font-size:.68rem;font-weight:600;background:var(--rule);border-radius:999px;padding:.15rem .5rem;color:var(--ink-60)}
-.et-actions{display:flex;gap:.5rem;flex-shrink:0;flex-wrap:wrap}
+.et-actions{display:flex;gap:.5rem;flex-shrink:0;flex-wrap:wrap;align-items:center}
 .et-empty{text-align:center;color:var(--ink-35);padding:2.5rem 0}
 
 /* editor */
