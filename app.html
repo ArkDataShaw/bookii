@@ -75,6 +75,10 @@
       </div>
       <button class="btn btn-primary" id="dash-new">+ New event type</button>
     </div>
+    <div class="card checklist" id="dash-checklist" hidden>
+      <h3 class="card-title">Get set up</h3>
+      <div id="checklist-items"></div>
+    </div>
     <div id="dash-list" class="et-list"></div>
   </section>
 
@@ -129,6 +133,24 @@
           <button class="linklike" id="ed-addq">+ add a question</button>
         </div>
         <div class="card">
+          <h3 class="card-title">Invitee permissions</h3>
+          <label class="check-row"><input type="checkbox" id="ed-allow-resched" checked> Invitees can reschedule</label>
+          <label class="check-row"><input type="checkbox" id="ed-allow-cancel" checked> Invitees can cancel</label>
+          <label>Cancellation policy <span class="opt">shown on cancel &amp; reschedule pages</span>
+            <textarea id="ed-policy" rows="2" maxlength="300" placeholder="e.g. Please give at least 24 hours notice."></textarea></label>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Embed on your site</h3>
+          <p class="mut small">Paste this where you want the booking page to appear.</p>
+          <div class="sched-tabs embed-tabs">
+            <button class="sched-tab on" data-emb="inline">Inline</button>
+            <button class="sched-tab" data-emb="popup">Popup button</button>
+          </div>
+          <pre class="embed-code" id="ed-embed-code"></pre>
+          <button class="btn btn-ghost btn-sm" id="ed-embed-copy">Copy code</button>
+          <span class="copied" id="ed-embed-copied" hidden>copied</span>
+        </div>
+        <div class="card">
           <h3 class="card-title">Visibility</h3>
           <label class="check-row"><input type="checkbox" id="ed-hidden"> Hidden — direct link works, but it won't be listed on your page</label>
           <button class="linklike danger" id="ed-delete">Delete this event type</button>
@@ -158,6 +180,15 @@
         </div>
         <label class="av-tz">Timezone<select id="av-tz"></select></label>
         <div class="week-grid" id="av-week"></div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Troubleshooter <span class="opt">why isn't a time showing?</span></h3>
+        <div class="ts-controls">
+          <select id="ts-event"></select>
+          <input type="date" id="ts-date">
+          <button class="btn btn-ghost btn-sm" id="ts-run">Explain</button>
+        </div>
+        <div id="ts-result" class="ts-result"></div>
       </div>
       <div class="card">
         <h3 class="card-title">Date overrides</h3>
@@ -303,7 +334,7 @@
 </main>
 
 <footer class="foot">
-  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/terms.html">terms</a> · <a href="mailto:support@bookii.to">support</a></p>
+  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/terms.html">terms</a> · <a href="/help.html">help</a> · <a href="/status.html">status</a> · <a href="/changelog.html">changelog</a> · <a href="mailto:support@bookii.to">support</a></p>
 </footer>
 <script src="/host.js"></script>
 </body>

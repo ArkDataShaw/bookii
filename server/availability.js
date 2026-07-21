@@ -95,6 +95,72 @@ export async function computeSlots(eventType, schedule, fromMs, days, opts = {})
   return { tz, days: out };
 }
 
+/* Troubleshooter: explain a single day — rules, busy blocks, and each candidate slot's fate. */
+export async function explainDay(eventType, schedule, dateKey, opts = {}) {
+  const tz = schedule.timezone;
+  const now = opts.nowMs || Date.now();
+  const et = eventType;
+  const [y, mo, d] = dateKey.split("-").map(Number);
+  const dayStart = zonedToUtc(y, mo, d, 0, 0, tz);
+  const dayEnd = dayStart + 86400000 + 3600000;
+
+  const [rules, overrides] = await Promise.all([
+    q(`SELECT weekday, start_min, end_min FROM schedule_rules WHERE schedule_id=$1`, [schedule.id]),
+    q(`SELECT date::text, start_min, end_min FROM date_overrides WHERE schedule_id=$1 AND date=$2`, [schedule.id, dateKey]),
+  ]);
+  const wd = weekdayInTz(dateKey, tz);
+  const hasOverride = overrides.rows.length > 0;
+  const ranges = hasOverride
+    ? overrides.rows.filter(o => o.start_min !== null).map(o => [o.start_min, o.end_min])
+    : rules.rows.filter(r => r.weekday === wd).map(r => [r.start_min, r.end_min]);
+
+  const [bk, hd] = await Promise.all([
+    q(`SELECT start_at, end_at, invitee_name FROM bookings WHERE user_id=$1 AND status IN ('pending','confirmed') AND start_at < $3 AND end_at > $2`,
+      [et.user_id, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()]),
+    q(`SELECT start_at, end_at FROM holds WHERE user_id=$1 AND expires_at > now() AND start_at < $3 AND end_at > $2`,
+      [et.user_id, new Date(dayStart).toISOString(), new Date(dayEnd).toISOString()]),
+  ]);
+  const external = await providerBusy(et.user_id, dayStart, dayEnd);
+  const bookings = bk.rows.map(r => ({ s: r.start_at.getTime(), e: r.end_at.getTime(), who: r.invitee_name }));
+  const holdsArr = hd.rows.map(r => ({ s: r.start_at.getTime(), e: r.end_at.getTime() }));
+
+  const step = (et.slot_interval_min || et.duration_min) * 60000;
+  const dur = et.duration_min * 60000;
+  const notice = now + et.min_notice_min * 60000;
+  const windowEnd = now + et.window_days * 86400000;
+  const slots = [];
+  for (const [sm, em] of ranges) {
+    const rs = zonedToUtc(y, mo, d, Math.floor(sm / 60), sm % 60, tz);
+    const re = zonedToUtc(y, mo, d, Math.floor(em / 60), em % 60, tz);
+    for (let s = rs; s + dur <= re; s += step) {
+      const e = s + dur;
+      let verdict = "open", detail = null;
+      if (s < notice) { verdict = "too_soon"; detail = `inside your ${et.min_notice_min >= 1440 ? Math.round(et.min_notice_min / 1440) + "-day" : Math.round(et.min_notice_min / 60) + "-hour"} minimum notice`; }
+      else if (s > windowEnd) { verdict = "beyond_window"; detail = `past your ${et.window_days}-day booking window`; }
+      else {
+        const hitB = bookings.find(b => overlaps(s - et.buffer_before_min * 60000, e + et.buffer_after_min * 60000, b.s, b.e));
+        const hitX = external.find(b => overlaps(s, e, b.s, b.e));
+        const hitH = holdsArr.find(h => overlaps(s, e, h.s, h.e));
+        if (hitB) { verdict = "booked"; detail = `blocked by your booking with ${hitB.who}${et.buffer_before_min || et.buffer_after_min ? " (incl. buffers)" : ""}`; }
+        else if (hitX) { verdict = "calendar_busy"; detail = "busy on a connected calendar"; }
+        else if (hitH) { verdict = "held"; detail = "temporarily held by someone booking right now"; }
+      }
+      slots.push({ start: new Date(s).toISOString(), verdict, detail });
+    }
+  }
+  return {
+    tz, dateKey,
+    dayInfo: {
+      weekday: wd, hasOverride,
+      workingRanges: ranges.map(([a, b]) => [a, b]),
+      blockedAllDay: hasOverride && !ranges.length,
+      noRules: !hasOverride && !ranges.length,
+    },
+    externalBusy: external.map(b => ({ start: new Date(b.s).toISOString(), end: new Date(b.e).toISOString() })),
+    slots,
+  };
+}
+
 /* Re-validate a single slot right before hold/booking. */
 export async function slotIsAvailable(eventType, schedule, startMs, opts = {}) {
   const { days } = await computeSlots(eventType, schedule, startMs - 3600000, 2, opts);

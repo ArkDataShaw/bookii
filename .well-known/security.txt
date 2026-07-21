@@ -1,0 +1,5 @@
+Contact: mailto:security@bookii.to
+Expires: 2027-07-21T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://bookii.to/.well-known/security.txt
+Policy: https://bookii.to/security

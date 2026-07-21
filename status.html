@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status — Bookii</title>
+<meta name="description" content="Live operational status of Bookii services.">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legal.css">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<style>
+.st-row{display:flex;justify-content:space-between;align-items:center;background:var(--paper-2);border:1px solid var(--rule);border-radius:12px;padding:1rem 1.2rem;margin-bottom:.7rem}
+.st-name{font-weight:600}
+.st-badge{font-family:var(--font-m);font-size:.75rem;border-radius:999px;padding:.25rem .7rem;font-weight:500}
+.st-ok{background:var(--leaf-soft);color:var(--leaf)}
+.st-bad{background:#FBE2E0;color:#B3261E}
+.st-wait{background:var(--rule);color:var(--ink-60)}
+.st-latency{font-family:var(--font-m);font-size:.75rem;color:var(--ink-35);margin-right:.8rem}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+</header>
+<main class="legal">
+  <h1 class="serif">Status</h1>
+  <p class="legal-meta">Checked live from your browser · <span id="st-time"></span></p>
+  <div id="st-list"></div>
+  <p class="mut" style="margin-top:1.6rem">Something look wrong? <a href="mailto:support@bookii.to">support@bookii.to</a></p>
+</main>
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy">privacy</a> · <a href="/terms">terms</a> · <a href="/changelog">changelog</a></p>
+</footer>
+<script>
+const CHECKS = [
+  ["Website", "https://bookii.to/favicon.svg"],
+  ["Booking app", "https://from.bookii.to/favicon.svg"],
+  ["API", "https://api.bookii.to/v1/health"],
+  ["Agent surface", "https://bookii.to/api/slots"],
+];
+const list = document.getElementById("st-list");
+document.getElementById("st-time").textContent = new Date().toLocaleString();
+for (const [name, url] of CHECKS) {
+  const row = document.createElement("div");
+  row.className = "st-row";
+  row.innerHTML = `<span class="st-name">${name}</span><span><span class="st-latency"></span><span class="st-badge st-wait">checking…</span></span>`;
+  list.appendChild(row);
+  const t0 = performance.now();
+  fetch(url, { cache: "no-store" }).then(r => {
+    const ms = Math.round(performance.now() - t0);
+    const b = row.querySelector(".st-badge");
+    row.querySelector(".st-latency").textContent = ms + "ms";
+    if (r.ok) { b.className = "st-badge st-ok"; b.textContent = "operational"; }
+    else { b.className = "st-badge st-bad"; b.textContent = "degraded (" + r.status + ")"; }
+  }).catch(() => {
+    const b = row.querySelector(".st-badge");
+    b.className = "st-badge st-bad"; b.textContent = "unreachable";
+  });
+}
+</script>
+</body>
+</html>

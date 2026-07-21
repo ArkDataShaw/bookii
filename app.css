@@ -183,3 +183,34 @@
 .confirmed-secondary{margin-top:-.4rem}
 .cx-reason{display:flex;flex-direction:column;gap:.35rem;font-size:.8rem;font-weight:600;color:var(--ink-60);text-align:left;margin:1rem 0}
 .cx-reason textarea{font-family:var(--font-b);font-size:.95rem;padding:.6rem .7rem;border-radius:9px;border:1.5px solid var(--rule);background:#fff}
+
+/* troubleshooter */
+.ts-controls{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem}
+.ts-controls select,.ts-controls input{padding:.45rem .5rem;border-radius:8px;border:1.5px solid var(--rule);background:#fff;font-size:.85rem;font-family:var(--font-b)}
+.ts-note{font-size:.85rem;color:var(--ink-60);margin:.2rem 0 .7rem}
+.ts-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:.35rem}
+.ts-slot{display:flex;justify-content:space-between;align-items:center;gap:.3rem;font-family:var(--font-m);font-size:.72rem;border-radius:7px;padding:.35rem .5rem;border:1px solid var(--rule)}
+.ts-slot.ts-ok{background:var(--leaf-soft);border-color:var(--leaf);color:var(--leaf)}
+.ts-slot.ts-warn{background:var(--apricot-soft);border-color:var(--apricot);color:#B05E1E}
+.ts-slot.ts-block{background:#f2f2f0;color:var(--ink-35);text-decoration:line-through}
+.ts-verdict{font-family:var(--font-b);font-size:.62rem;font-weight:600;text-decoration:none}
+.ts-details{margin-top:.7rem;font-size:.82rem;color:var(--ink-60)}
+.ts-details summary{cursor:pointer;font-weight:600}
+
+/* embed mode: chrome-less booking page */
+.embed-mode .topbar,.embed-mode .foot{display:none !important}
+.embed-mode .view{padding:.6rem}
+.embed-mode .bookpage{box-shadow:none;border:none;background:transparent}
+
+/* onboarding checklist */
+.checklist{margin-bottom:1.2rem}
+.check-item{display:flex;align-items:center;gap:.7rem;padding:.5rem 0;font-size:.92rem;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+.check-item:last-child{border-bottom:none}
+.check-item:hover{text-decoration:none;color:var(--blue-deep)}
+.check-item.done{color:var(--ink-35)}
+.check-dot{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:.75rem;flex-shrink:0;background:#fff}
+.check-item.done .check-dot{background:var(--leaf);border-color:var(--leaf);color:#fff}
+
+/* embed generator */
+.embed-tabs{margin-bottom:.6rem}
+.embed-code{background:var(--ink);color:#C9CDDC;border-radius:10px;padding:.9rem 1rem;font-family:var(--font-m);font-size:.72rem;white-space:pre-wrap;word-break:break-all;line-height:1.55}

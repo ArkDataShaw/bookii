@@ -3,10 +3,11 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { q, pool, migrate } from "./db.js";
 import { hashPassword, verifyPassword, createSession, requireUser, RESERVED_USERNAMES, SLUG_RE } from "./auth.js";
-import { computeSlots, slotIsAvailable } from "./availability.js";
+import { computeSlots, slotIsAvailable, explainDay } from "./availability.js";
 import { isValidTz } from "./time.js";
 import * as G from "./google.js";
 import { encrypt, signState, verifyState } from "./crypto.js";
+import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails } from "./email.js";
 
 const app = new Hono();
 
@@ -200,7 +201,8 @@ app.delete("/v1/schedules/:id", async (c) => {
 /* ---------------- event types ---------------- */
 const ET_FIELDS = ["title", "slug", "description", "duration_min", "color", "locations",
   "buffer_before_min", "buffer_after_min", "min_notice_min", "window_days",
-  "slot_interval_min", "daily_cap", "questions", "hidden", "schedule_id"];
+  "slot_interval_min", "daily_cap", "questions", "hidden", "schedule_id",
+  "allow_reschedule", "allow_cancel", "cancel_policy"];
 
 app.get("/v1/event-types", async (c) => {
   const u = await requireUser(c);
@@ -285,6 +287,18 @@ app.delete("/v1/event-types/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+/* ---------------- troubleshooter ---------------- */
+app.get("/v1/troubleshoot/:eventTypeId/:date", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(c.req.param("date"))) return err(c, 400, "date must be YYYY-MM-DD");
+  const et = (await q(`SELECT * FROM event_types WHERE id=$1 AND user_id=$2`, [c.req.param("eventTypeId"), u.id])).rows[0];
+  if (!et) return err(c, 404, "Event type not found.");
+  const sched = (await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id])).rows[0];
+  if (!sched) return err(c, 409, "This event type has no schedule attached.");
+  return c.json(await explainDay(et, sched, c.req.param("date")));
+});
+
 /* ---------------- bookings (host view) ---------------- */
 app.get("/v1/bookings", async (c) => {
   const u = await requireUser(c);
@@ -304,7 +318,10 @@ app.patch("/v1/bookings/:id/status", async (c) => {
   if (!["cancelled", "no_show", "attended", "confirmed"].includes(status)) return err(c, 400, "Bad status.");
   const r = await q(`UPDATE bookings SET status=$1 WHERE id=$2 AND user_id=$3 RETURNING id`, [status, c.req.param("id"), u.id]);
   if (!r.rows.length) return err(c, 404, "Booking not found.");
-  if (status === "cancelled") await removeExternalEvent(c.req.param("id"));
+  if (status === "cancelled") {
+    await removeExternalEvent(c.req.param("id"));
+    sendCancellationEmails(c.req.param("id"), "the host").catch(() => {});
+  }
   return c.json({ ok: true });
 });
 
@@ -429,6 +446,8 @@ app.get("/v1/pages/:username/:slug", async (c) => {
     eventType: {
       id: et.id, title: et.title, slug: et.slug, description: et.description,
       durationMin: et.duration_min, color: et.color, locations: et.locations, questions: et.questions,
+      allowReschedule: et.allow_reschedule !== false, allowCancel: et.allow_cancel !== false,
+      cancelPolicy: et.cancel_policy || "",
     },
     hostTz: tz,
     days: slotDays,
@@ -516,6 +535,7 @@ app.post("/v1/public-bookings", async (c) => {
         [JSON.stringify({ google: { connectionId: dest.id, eventId: evId } }), booking.id]);
     }
   } catch (e) { console.error("calendar write-back:", e.message); }
+  sendBookingEmails({ ...booking, invitee_name: name, invitee_email: email, location: String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "") }, et, et.user_id).catch(() => {});
   const resp = { bookingId: booking.id, status: booking.status, start: booking.start_at, end: booking.end_at, cancelToken: booking.cancel_token, eventTitle: et.title };
   if (idem) await q(`INSERT INTO idempotency_keys (key, response) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [idem, JSON.stringify(resp)]);
   return c.json(resp, 201);
@@ -536,7 +556,8 @@ app.get("/v1/public-bookings/:id", async (c) => {
   const token = c.req.query("token") || "";
   const r = await q(
     `SELECT b.id, b.start_at, b.end_at, b.status, b.invitee_name, b.invitee_email,
-            et.title, et.slug, et.duration_min, u.username, u.name AS host_name
+            et.title, et.slug, et.duration_min, et.allow_reschedule, et.allow_cancel, et.cancel_policy,
+            u.username, u.name AS host_name
      FROM bookings b JOIN event_types et ON et.id=b.event_type_id JOIN users u ON u.id=b.user_id
      WHERE b.id=$1 AND b.cancel_token=$2`, [c.req.param("id"), token]);
   if (!r.rows.length) return err(c, 404, "Booking not found.");
@@ -554,6 +575,7 @@ app.post("/v1/public-bookings/:id/reschedule", async (c) => {
   const b = br.rows[0];
   if (!b) return err(c, 404, "Booking not found (or already cancelled).");
   const et = (await q(`SELECT * FROM event_types WHERE id=$1`, [b.event_type_id])).rows[0];
+  if (et.allow_reschedule === false) return err(c, 403, "The host has disabled rescheduling for this event — contact them directly.");
   const sched = (await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id])).rows[0];
   if (!sched) return err(c, 409, "This event can't be rescheduled right now.");
   const endMs = startMs + et.duration_min * 60000;
@@ -588,11 +610,16 @@ app.post("/v1/public-bookings/:id/reschedule", async (c) => {
       }
     }
   } catch (e) { console.error("reschedule calendar sync:", e.message); }
+  sendRescheduleEmails(b.id, b.start_at.toISOString()).catch(() => {});
   return c.json({ ok: true, start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() });
 });
 
 app.post("/v1/public-bookings/:id/cancel", async (c) => {
   const { cancelToken, reason } = await c.req.json().catch(() => ({}));
+  const chk = await q(
+    `SELECT et.allow_cancel FROM bookings b JOIN event_types et ON et.id=b.event_type_id WHERE b.id=$1 AND b.cancel_token=$2`,
+    [c.req.param("id"), cancelToken || ""]);
+  if (chk.rows[0] && chk.rows[0].allow_cancel === false) return err(c, 403, "The host has disabled cancellation for this event — contact them directly.");
   const r = await q(
     `UPDATE bookings SET status='cancelled',
        answers = answers || $3
@@ -601,6 +628,7 @@ app.post("/v1/public-bookings/:id/cancel", async (c) => {
       JSON.stringify(reason ? { _cancel_reason: String(reason).slice(0, 300) } : {})]);
   if (!r.rows.length) return err(c, 404, "Booking not found (or already cancelled).");
   await removeExternalEvent(c.req.param("id"));
+  sendCancellationEmails(c.req.param("id"), "the invitee").catch(() => {});
   return c.json({ ok: true });
 });
 

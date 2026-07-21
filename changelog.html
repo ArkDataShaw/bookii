@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog — Bookii</title>
+<meta name="description" content="What's new in Bookii.">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legal.css">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<style>
+.cl-entry{border-left:2px solid var(--rule);padding:0 0 1.8rem 1.4rem;position:relative}
+.cl-entry::before{content:"";position:absolute;left:-5px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--blue)}
+.cl-date{font-family:var(--font-m);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-35);margin:0 0 .3rem}
+.cl-entry h2{margin:.1rem 0 .4rem !important;font-size:1.15rem !important}
+.cl-entry ul{margin:.3rem 0}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="wordmark" href="/">bookii<span class="wordmark-dot">.</span></a>
+  <a class="topbar-spec" href="https://from.bookii.to/">Sign in</a>
+</header>
+<main class="legal">
+  <h1 class="serif">Changelog</h1>
+  <p class="legal-meta">Everything we ship, as we ship it.</p>
+
+  <div class="cl-entry">
+    <p class="cl-date">July 21, 2026</p>
+    <h2 class="serif">Reschedule, edge states, settings & the P0 wave</h2>
+    <ul>
+      <li>Invitees can now <strong>reschedule</strong> from any confirmation — same booking, new time, never a confusing cancel-and-rebook.</li>
+      <li>Empty calendars now show <strong>"Next availability"</strong> instead of a dead end.</li>
+      <li>Add-to-calendar links for Google, Outlook, and Yahoo beside the .ics download.</li>
+      <li>Meetings got Upcoming / Pending / Past / Cancelled tabs.</li>
+      <li>New Settings page: profile, link, notification preferences, account deletion.</li>
+      <li>Cancel flow asks (optionally) why, and offers a rebook.</li>
+      <li>Privacy policy and terms published.</li>
+    </ul>
+  </div>
+
+  <div class="cl-entry">
+    <p class="cl-date">July 21, 2026</p>
+    <h2 class="serif">Official brand + Google sync plumbing</h2>
+    <ul>
+      <li>The bookii wordmark and mark landed everywhere — site, app, favicons.</li>
+      <li>Google Calendar sync fully built: encrypted tokens, busy-time merging, booking write-back. Activating with OAuth verification.</li>
+    </ul>
+  </div>
+
+  <div class="cl-entry">
+    <p class="cl-date">July 19–20, 2026</p>
+    <h2 class="serif">Bookii goes live</h2>
+    <ul>
+      <li><strong>bookii.to</strong> and the app at <strong>from.bookii.to</strong>: create event types with live preview, paint your availability, share clean links (<span style="font-family:var(--font-m);font-size:.85em">from.bookii.to/you/intro</span>).</li>
+      <li>Real availability engine with buffers, notice windows, daily caps, and race-free two-phase booking.</li>
+      <li>Agent-native from day one: machine-readable slots, llms.txt, agent.json, OpenAPI.</li>
+    </ul>
+  </div>
+</main>
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy">privacy</a> · <a href="/terms">terms</a> · <a href="/status">status</a></p>
+</footer>
+</body>
+</html>

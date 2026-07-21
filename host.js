@@ -186,6 +186,7 @@
     link.href = pageUrl;
     show("dashboard");
     const { eventTypes } = await api("/event-types");
+    renderChecklist(eventTypes).catch(() => {});
     const list = $("#dash-list");
     list.innerHTML = "";
     if (!eventTypes.length) {
@@ -212,6 +213,40 @@
       });
       list.appendChild(el);
     }
+  }
+  async function renderChecklist(eventTypes) {
+    if (localStorage.getItem("bookii-checklist-done")) { $("#dash-checklist").hidden = true; return; }
+    const [{ connections }, { bookings }] = await Promise.all([
+      api("/calendar-connections"), api("/bookings"),
+    ]);
+    const items = [
+      ["Claim your link", !!me.username, "#/settings"],
+      ["Create an event type", eventTypes.length > 0, "#/event/new"],
+      ["Connect a calendar", connections.some(c => c.status === "connected"), "#/calendars"],
+      ["Share your link", bookings.length > 0, null], // done once someone books
+    ];
+    const doneCount = items.filter(i => i[1]).length;
+    if (doneCount === items.length) { localStorage.setItem("bookii-checklist-done", "1"); $("#dash-checklist").hidden = true; return; }
+    const wrap = $("#checklist-items");
+    wrap.innerHTML = "";
+    for (const [label, done, href] of items) {
+      const row = document.createElement(done || !href ? "div" : "a");
+      if (href && !done) row.href = href;
+      row.className = "check-item" + (done ? " done" : "");
+      row.innerHTML = `<span class="check-dot">${done ? "✓" : ""}</span><span>${label}</span>`;
+      if (label === "Share your link" && !done) {
+        const btn = document.createElement("button");
+        btn.className = "linklike"; btn.textContent = "copy link";
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await navigator.clipboard.writeText(`https://from.bookii.to/${me.username}`).catch(() => {});
+          toast("Link copied — send it to someone!");
+        });
+        row.appendChild(btn);
+      }
+      wrap.appendChild(row);
+    }
+    $("#dash-checklist").hidden = false;
   }
   $("#dash-copy-page").addEventListener("click", async () => {
     await navigator.clipboard.writeText(`https://from.bookii.to/${me.username}`).catch(() => {});
@@ -270,6 +305,10 @@
     selOptions($("#ed-interval"), [["", "Event length"], ["15", "15 min"], ["30", "30 min"], ["60", "60 min"]], ed.slot_interval_min ?? "");
     selOptions($("#ed-cap"), [["", "No limit"], ["2", "2"], ["4", "4"], ["6", "6"], ["8", "8"]], ed.daily_cap ?? "");
     $("#ed-hidden").checked = ed.hidden;
+    $("#ed-allow-resched").checked = ed.allow_reschedule !== false;
+    $("#ed-allow-cancel").checked = ed.allow_cancel !== false;
+    $("#ed-policy").value = ed.cancel_policy || "";
+    renderEmbedCode();
     renderDurations(); renderLocations(); renderSwatches(); renderQuestions();
     setDirty(false);
     refreshPreview();
@@ -296,6 +335,9 @@
       questions: ed.questions,
       hidden: $("#ed-hidden").checked,
       schedule_id: $("#ed-schedule").value,
+      allow_reschedule: $("#ed-allow-resched").checked,
+      allow_cancel: $("#ed-allow-cancel").checked,
+      cancel_policy: $("#ed-policy").value.trim(),
     };
   }
   function renderDurations() {
@@ -360,6 +402,27 @@
     ed.questions.push({ id: "q" + Date.now(), label: "", type: "text", required: false });
     renderQuestions();
   });
+  /* embed generator */
+  let embMode = "inline";
+  function renderEmbedCode() {
+    const url = `https://from.bookii.to/${me.username}/${ed.slug || "your-event"}?embed=1`;
+    const code = embMode === "inline"
+      ? `<iframe src="${url}"\n  style="width:100%;min-height:640px;border:0;border-radius:12px"\n  title="Book with ${me.name || me.username}"></iframe>`
+      : `<button onclick="window.open('${url.replace("?embed=1", "")}','bookii','width=980,height=760')"\n  style="background:#2B3EE5;color:#fff;border:0;border-radius:999px;padding:12px 24px;\n  font-size:15px;font-weight:600;cursor:pointer">Book time with ${me.name || me.username}</button>`;
+    $("#ed-embed-code").textContent = code;
+  }
+  document.querySelectorAll("[data-emb]").forEach(b => b.addEventListener("click", () => {
+    embMode = b.dataset.emb;
+    document.querySelectorAll("[data-emb]").forEach(x => x.classList.toggle("on", x === b));
+    renderEmbedCode();
+  }));
+  $("#ed-embed-copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText($("#ed-embed-code").textContent).catch(() => {});
+    $("#ed-embed-copied").hidden = false;
+    setTimeout(() => { $("#ed-embed-copied").hidden = true; }, 1500);
+  });
+  for (const id of ["ed-allow-resched", "ed-allow-cancel", "ed-policy"]) $("#" + id).addEventListener("input", onEdit);
+
   function onEdit() { setDirty(true); clearTimeout(pvTimer); pvTimer = setTimeout(refreshPreview, 400); }
   let slugTouched = false;
   $("#ed-slug").addEventListener("input", () => { slugTouched = true; });
@@ -445,6 +508,7 @@
     if (!curSched || !schedules.find(s => s.id === curSched.id)) curSched = schedules.find(s => s.is_default) || schedules[0];
     else curSched = schedules.find(s => s.id === curSched.id);
     renderSchedTabs(); renderSchedEditor();
+    initTroubleshooter().catch(() => {});
   }
   function renderSchedTabs() {
     const tabs = $("#av-tabs");
@@ -557,6 +621,48 @@
       renderAvailability();
     } catch (e) { toast(e.message); }
   });
+  /* ---------- troubleshooter ---------- */
+  const VERDICT_LABELS = {
+    open: ["✓ offered", "ts-ok"],
+    too_soon: ["min notice", "ts-warn"],
+    beyond_window: ["window", "ts-warn"],
+    booked: ["booked", "ts-block"],
+    calendar_busy: ["calendar busy", "ts-block"],
+    held: ["held", "ts-warn"],
+  };
+  async function initTroubleshooter() {
+    const { eventTypes } = await api("/event-types");
+    selOptions($("#ts-event"), eventTypes.map(e => [e.id, e.title]), eventTypes[0]?.id);
+    if (!$("#ts-date").value) $("#ts-date").value = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  }
+  $("#ts-run").addEventListener("click", async () => {
+    const out = $("#ts-result");
+    out.innerHTML = '<p class="mut small">Checking…</p>';
+    try {
+      const r = await api(`/troubleshoot/${$("#ts-event").value}/${$("#ts-date").value}`);
+      let html = "";
+      if (r.dayInfo.blockedAllDay) html += '<p class="ts-note">This date is <strong>blocked all day</strong> by a date override.</p>';
+      else if (r.dayInfo.noRules) html += '<p class="ts-note">Your schedule has <strong>no working hours</strong> on this weekday.</p>';
+      else {
+        html += `<p class="ts-note">Working hours: ${r.dayInfo.workingRanges.map(([a, b]) => `${minToLabel(a)}–${minToLabel(b)}`).join(", ")}${r.dayInfo.hasOverride ? " (date override)" : ""}${r.externalBusy.length ? ` · ${r.externalBusy.length} busy block${r.externalBusy.length > 1 ? "s" : ""} from connected calendars` : ""}</p>`;
+        html += '<div class="ts-slots">';
+        for (const s of r.slots) {
+          const [label, cls] = VERDICT_LABELS[s.verdict] || [s.verdict, "ts-warn"];
+          html += `<div class="ts-slot ${cls}" ${s.detail ? `title="${esc(s.detail)}"` : ""}>
+            <span>${fmtTime(s.start, r.tz)}</span><span class="ts-verdict">${label}</span></div>`;
+        }
+        html += "</div>";
+        const blocked = r.slots.filter(s => s.verdict !== "open");
+        if (blocked.length) {
+          html += '<details class="ts-details"><summary>Details</summary><ul>';
+          for (const s of blocked) html += `<li><strong>${fmtTime(s.start, r.tz)}</strong> — ${esc(s.detail || s.verdict)}</li>`;
+          html += "</ul></details>";
+        }
+      }
+      out.innerHTML = html || '<p class="mut small">Nothing to show.</p>';
+    } catch (e) { out.innerHTML = `<p class="form-error">${esc(e.message)}</p>`; }
+  });
+
   $("#av-new").addEventListener("click", async () => {
     const r = await api("/schedules", { method: "POST", body: { name: "New schedule" } }).catch(e => toast(e.message));
     if (r) { curSched = { ...r.schedule }; renderAvailability(); }
@@ -784,6 +890,9 @@
     if (info.status === "cancelled") {
       return renderPublicError("This booking was cancelled — you can book a fresh time instead.", info.username && `#/u/${info.username}/${info.slug}`);
     }
+    if (info.allow_reschedule === false) {
+      return renderPublicError("The host has disabled rescheduling for this event — contact them directly to change the time.", null);
+    }
     pb.resched = { id, token, former: info.start_at, name: info.invitee_name, email: info.invitee_email };
     await renderPublic(info.username, info.slug);
     // banner with the former time
@@ -791,7 +900,7 @@
     banner.className = "resched-banner";
     banner.innerHTML = `Rescheduling <strong>${esc(info.title)}</strong> — currently
       <s>${fmtDay(info.start_at, pb.viewerTz)} · ${fmtTime(info.start_at, pb.viewerTz)}</s>.
-      Pick a new time below.`;
+      Pick a new time below.${info.cancel_policy ? `<br><span class="mut small">${esc(info.cancel_policy)}</span>` : ""}`;
     $("#pub-page").prepend(banner);
   }
 
@@ -812,9 +921,15 @@
     </div>`;
   }
 
+  const EMBED = new URLSearchParams(location.search).has("embed");
+  if (EMBED) document.body.classList.add("embed-mode");
   async function renderPublic(username, slug) {
     show("public");
     pb.username = username; pb.slug = slug;
+    // prefill from query params (?name=&email= — for embeds and links)
+    const qp = new URLSearchParams(location.search);
+    if (qp.get("name")) $("#pb-name").value = qp.get("name");
+    if (qp.get("email")) $("#pb-email").value = qp.get("email");
     if (!location.hash.includes("reschedule")) pb.resched = null;
     $("#pb-confirmed").hidden = true;
     document.querySelectorAll(".resched-banner").forEach(el => el.remove());
@@ -1059,6 +1174,8 @@
     $("#pb-whentz").textContent = dualTz(booking.start);
     $("#pb-cancel-link").href = `#/cancel/${booking.bookingId}/${booking.cancelToken}`;
     $("#pb-resched-link").href = `#/reschedule/${booking.bookingId}/${booking.cancelToken}`;
+    $("#pb-cancel-link").hidden = pb.data.eventType.allowCancel === false;
+    $("#pb-resched-link").hidden = pb.data.eventType.allowReschedule === false;
     const links = calDeepLinks(booking);
     $("#pb-addcal").innerHTML =
       `<a href="${links.google}" target="_blank" rel="noopener">Google</a> ·
@@ -1096,7 +1213,14 @@
     let rebookHref = null;
     try {
       const { booking } = await api(`/public-bookings/${id}?token=${encodeURIComponent(token)}`);
-      $("#cx-msg").textContent = `Cancel ${booking.title} on ${fmtDay(booking.start_at, detectedTz)} at ${fmtTime(booking.start_at, detectedTz)}?`;
+      if (booking.allow_cancel === false) {
+        $("#cx-msg").textContent = "The host has disabled cancellation for this event — contact them directly.";
+        $("#cx-reason-wrap").hidden = true;
+        btn.hidden = true;
+        return;
+      }
+      $("#cx-msg").textContent = `Cancel ${booking.title} on ${fmtDay(booking.start_at, detectedTz)} at ${fmtTime(booking.start_at, detectedTz)}?` +
+        (booking.cancel_policy ? `\n${booking.cancel_policy}` : "");
       if (booking.username) rebookHref = `#/u/${booking.username}/${booking.slug}`;
     } catch {}
     btn.onclick = async () => {
