@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { q, pool, migrate } from "./db.js";
 import { hashPassword, verifyPassword, createSession, requireUser, RESERVED_USERNAMES, SLUG_RE } from "./auth.js";
-import { computeSlots, slotIsAvailable, explainDay } from "./availability.js";
+import { computeSlots, slotIsAvailable, explainDay, computeTeamSlots, hostsFreeAt, pickHost } from "./availability.js";
 import { isValidTz } from "./time.js";
 import * as G from "./google.js";
 import { encrypt, signState, verifyState } from "./crypto.js";
@@ -366,6 +366,151 @@ app.delete("/v1/event-types/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+/* ---------------- teams ---------------- */
+async function teamRole(teamId, userId) {
+  const r = await q(`SELECT role FROM team_members WHERE team_id=$1 AND user_id=$2`, [teamId, userId]);
+  return r.rows[0]?.role || null;
+}
+
+app.get("/v1/teams", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const r = await q(
+    `SELECT t.*, tm.role FROM teams t JOIN team_members tm ON tm.team_id=t.id WHERE tm.user_id=$1 ORDER BY t.created_at`, [u.id]);
+  return c.json({ teams: r.rows });
+});
+
+app.post("/v1/teams", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const b = await c.req.json().catch(() => ({}));
+  if (!b.name) return err(c, 400, "Give the team a name.");
+  const slug = String(b.slug || b.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  if (!SLUG_RE.test(slug) || RESERVED_USERNAMES.has(slug)) return err(c, 400, "That team link isn't available.");
+  let team;
+  try {
+    team = (await q(`INSERT INTO teams (name, slug, bio) VALUES ($1,$2,$3) RETURNING *`,
+      [String(b.name).slice(0, 80), slug, String(b.bio || "").slice(0, 300)])).rows[0];
+  } catch (e) {
+    if (e.code === "23505") return err(c, 409, "That team link is taken.");
+    throw e;
+  }
+  await q(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1,$2,'owner')`, [team.id, u.id]);
+  return c.json({ team: { ...team, role: "owner" } }, 201);
+});
+
+app.get("/v1/teams/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!role) return err(c, 404, "Team not found.");
+  const [team, members, ets] = await Promise.all([
+    q(`SELECT * FROM teams WHERE id=$1`, [c.req.param("id")]),
+    q(`SELECT tm.role, u.id, u.name, u.email, u.username FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1 ORDER BY tm.created_at`, [c.req.param("id")]),
+    q(`SELECT et.*, (SELECT array_agg(h.user_id) FROM event_type_hosts h WHERE h.event_type_id=et.id) AS host_ids
+       FROM event_types et WHERE et.team_id=$1 ORDER BY et.created_at`, [c.req.param("id")]),
+  ]);
+  return c.json({ team: { ...team.rows[0], role }, members: members.rows, eventTypes: ets.rows });
+});
+
+app.post("/v1/teams/:id/members", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can add members.");
+  const b = await c.req.json().catch(() => ({}));
+  const member = (await q(`SELECT id, name, email FROM users WHERE email=$1`, [(b.email || "").toLowerCase()])).rows[0];
+  if (!member) return err(c, 404, "No Bookii account with that email — have them sign up at from.bookii.to first.");
+  await q(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [c.req.param("id"), member.id, ["admin", "member"].includes(b.role) ? b.role : "member"]);
+  return c.json({ ok: true, member });
+});
+
+app.delete("/v1/teams/:id/members/:userId", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  const removingSelf = c.req.param("userId") === u.id;
+  if (!removingSelf && !["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can remove members.");
+  const target = await teamRole(c.req.param("id"), c.req.param("userId"));
+  if (target === "owner") return err(c, 400, "The owner can't be removed.");
+  await q(`DELETE FROM team_members WHERE team_id=$1 AND user_id=$2`, [c.req.param("id"), c.req.param("userId")]);
+  await q(`DELETE FROM event_type_hosts WHERE user_id=$1 AND event_type_id IN (SELECT id FROM event_types WHERE team_id=$2)`,
+    [c.req.param("userId"), c.req.param("id")]);
+  return c.json({ ok: true });
+});
+
+app.post("/v1/teams/:id/event-types", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can create team events.");
+  const b = await c.req.json().catch(() => ({}));
+  if (!b.title) return err(c, 400, "Give the event a name.");
+  const st = ["round_robin", "collective"].includes(b.scheduling_type) ? b.scheduling_type : "round_robin";
+  const hostIds = Array.isArray(b.host_ids) ? b.host_ids : [];
+  const valid = (await q(`SELECT user_id FROM team_members WHERE team_id=$1 AND user_id = ANY($2)`,
+    [c.req.param("id"), hostIds])).rows.map(r => r.user_id);
+  if (!valid.length) return err(c, 400, "Pick at least one host from the team.");
+  let slug = String(b.slug || b.title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "meeting";
+  for (let n = 2; n < 50; n++) {
+    const clash = await q(`SELECT 1 FROM event_types WHERE team_id=$1 AND slug=$2`, [c.req.param("id"), slug]);
+    if (!clash.rows.length) break;
+    slug = `${slug.replace(/-\d+$/, "")}-${n}`;
+  }
+  const et = (await q(
+    `INSERT INTO event_types (user_id, team_id, scheduling_type, title, slug, duration_min, description)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [u.id, c.req.param("id"), st, String(b.title).slice(0, 80), slug, +b.duration_min || 30, String(b.description || "").slice(0, 500)])).rows[0];
+  for (const uid of valid) await q(`INSERT INTO event_type_hosts (event_type_id, user_id) VALUES ($1,$2)`, [et.id, uid]);
+  return c.json({ eventType: { ...et, host_ids: valid } }, 201);
+});
+
+app.put("/v1/teams/:id/event-types/:etId/hosts", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can change hosts.");
+  const b = await c.req.json().catch(() => ({}));
+  const valid = (await q(`SELECT user_id FROM team_members WHERE team_id=$1 AND user_id = ANY($2)`,
+    [c.req.param("id"), Array.isArray(b.host_ids) ? b.host_ids : []])).rows.map(r => r.user_id);
+  if (!valid.length) return err(c, 400, "Pick at least one host.");
+  await q(`DELETE FROM event_type_hosts WHERE event_type_id=$1`, [c.req.param("etId")]);
+  for (const uid of valid) await q(`INSERT INTO event_type_hosts (event_type_id, user_id) VALUES ($1,$2)`, [c.req.param("etId"), uid]);
+  return c.json({ ok: true });
+});
+
+/* ---------------- public team pages ---------------- */
+app.get("/v1/pages/team/:slug", async (c) => {
+  const t = (await q(`SELECT * FROM teams WHERE slug=$1`, [c.req.param("slug").toLowerCase()])).rows[0];
+  if (!t) return err(c, 404, "Page not found.");
+  const ets = await q(`SELECT title, slug, description, duration_min, color, scheduling_type FROM event_types WHERE team_id=$1 AND hidden=false ORDER BY created_at`, [t.id]);
+  return c.json({ team: { name: t.name, slug: t.slug, bio: t.bio }, eventTypes: ets.rows });
+});
+
+app.get("/v1/pages/team/:slug/:eventSlug", async (c) => {
+  const t = (await q(`SELECT * FROM teams WHERE slug=$1`, [c.req.param("slug").toLowerCase()])).rows[0];
+  if (!t) return err(c, 404, "Page not found.");
+  const et = (await q(`SELECT * FROM event_types WHERE team_id=$1 AND slug=$2`, [t.id, c.req.param("eventSlug").toLowerCase()])).rows[0];
+  if (!et) return err(c, 404, "Page not found.");
+  const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+  const from = c.req.query("from");
+  const fromMs = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? Date.parse(from + "T12:00:00Z") : Date.now();
+  const days = Math.min(+(c.req.query("days") || 31), 62);
+  const { tz, days: slotDays } = await computeTeamSlots(et, hostIds, fromMs, days);
+  return c.json({
+    host: { name: t.name, username: "team/" + t.slug, welcome_note: t.bio },
+    eventType: {
+      id: et.id, title: et.title, slug: et.slug, description: et.description,
+      durationMin: et.duration_min, color: et.color, locations: et.locations, questions: et.questions,
+      allowReschedule: et.allow_reschedule !== false, allowCancel: et.allow_cancel !== false,
+      cancelPolicy: et.cancel_policy || "", schedulingType: et.scheduling_type,
+    },
+    hostTz: tz,
+    days: slotDays,
+  });
+});
+
 /* ---------------- API keys & agent tokens ---------------- */
 const VALID_SCOPES = ["read-availability", "create-booking", "manage-bookings", "manage-event-types"];
 
@@ -710,13 +855,23 @@ app.post("/v1/holds", async (c) => {
   const er = await q(`SELECT * FROM event_types WHERE id=$1`, [eventTypeId]);
   const et = er.rows[0];
   if (!et) return err(c, 404, "Event type not found.");
-  const sr = await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id]);
-  if (!sr.rows[0]) return err(c, 404, "No schedule.");
-  if (!(await slotIsAvailable(et, sr.rows[0], startMs))) return err(c, 409, "That time is no longer available.");
+  let holdUserId = et.user_id;
+  if (et.team_id) {
+    // team event: find free hosts at this time, pick one now (hold reserves that host)
+    const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+    const free = await hostsFreeAt(et, hostIds, startMs);
+    const need = et.scheduling_type === "collective" ? hostIds.length : 1;
+    if (free.length < need) return err(c, 409, "That time is no longer available.");
+    holdUserId = et.scheduling_type === "collective" ? hostIds[0] : await pickHost(et, free);
+  } else {
+    const sr = await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id]);
+    if (!sr.rows[0]) return err(c, 404, "No schedule.");
+    if (!(await slotIsAvailable(et, sr.rows[0], startMs))) return err(c, 409, "That time is no longer available.");
+  }
   const endMs = startMs + et.duration_min * 60000;
   const r = await q(
     `INSERT INTO holds (event_type_id, user_id, start_at, end_at, expires_at) VALUES ($1,$2,$3,$4, now() + interval '${HOLD_TTL_S} seconds') RETURNING id, expires_at`,
-    [et.id, et.user_id, new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
+    [et.id, holdUserId, new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
   if (k?.key) logAgentAction(k.key, "hold.created", { eventType: et.slug, start }).catch(() => {});
   return c.json({ holdId: r.rows[0].id, expiresAt: r.rows[0].expires_at }, 201);
 });
@@ -733,7 +888,7 @@ app.post("/v1/public-bookings", async (c) => {
   const { holdId, eventTypeId, start, name, email, answers, location, agent, principal } = b;
   if (!name || !email) return err(c, 400, "Name and email are required.");
 
-  let et, startMs;
+  let et, startMs, assignedHost = null;
   if (holdId) {
     const hr = await q(`SELECT * FROM holds WHERE id=$1 AND expires_at > now()`, [holdId]);
     if (!hr.rows.length) return err(c, 410, "Hold expired — pick the time again.");
@@ -741,14 +896,24 @@ app.post("/v1/public-bookings", async (c) => {
     const er = await q(`SELECT * FROM event_types WHERE id=$1`, [h.event_type_id]);
     et = er.rows[0];
     startMs = h.start_at.getTime();
+    assignedHost = h.user_id; // team holds already carry the picked host
   } else {
     const er = await q(`SELECT * FROM event_types WHERE id=$1`, [eventTypeId]);
     et = er.rows[0];
     startMs = Date.parse(start || "");
     if (!et || !startMs) return err(c, 400, "eventTypeId and start required (or a holdId).");
-    const sr = await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id]);
-    if (!(await slotIsAvailable(et, sr.rows[0], startMs))) return err(c, 409, "That time is no longer available.");
+    if (et.team_id) {
+      const hostIds = (await q(`SELECT user_id FROM event_type_hosts WHERE event_type_id=$1`, [et.id])).rows.map(r => r.user_id);
+      const free = await hostsFreeAt(et, hostIds, startMs);
+      const need = et.scheduling_type === "collective" ? hostIds.length : 1;
+      if (free.length < need) return err(c, 409, "That time is no longer available.");
+      assignedHost = et.scheduling_type === "collective" ? hostIds[0] : await pickHost(et, free);
+    } else {
+      const sr = await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id]);
+      if (!(await slotIsAvailable(et, sr.rows[0], startMs))) return err(c, 409, "That time is no longer available.");
+    }
   }
+  const bookAs = assignedHost || et.user_id;
   const endMs = startMs + et.duration_min * 60000;
 
   const client = await pool.connect();
@@ -760,7 +925,7 @@ app.post("/v1/public-bookings", async (c) => {
       `INSERT INTO bookings (event_type_id, user_id, start_at, end_at, invitee_name, invitee_email, answers, location, origin, agent_name, principal)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id, start_at, end_at, status, cancel_token`,
-      [et.id, et.user_id, new Date(startMs).toISOString(), new Date(endMs).toISOString(),
+      [et.id, bookAs, new Date(startMs).toISOString(), new Date(endMs).toISOString(),
         String(name).slice(0, 100), String(email).slice(0, 200), JSON.stringify(answers || {}),
         String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "").slice(0, 100),
         (agent || k?.key?.kind === "agent") ? "agent" : "human",
@@ -777,9 +942,9 @@ app.post("/v1/public-bookings", async (c) => {
   client.release();
   // write to the host's destination calendar (best effort — booking stands regardless)
   try {
-    const dest = (await q(`SELECT * FROM calendar_connections WHERE user_id=$1 AND provider='google' AND status='connected' AND is_destination=true LIMIT 1`, [et.user_id])).rows[0];
+    const dest = (await q(`SELECT * FROM calendar_connections WHERE user_id=$1 AND provider='google' AND status='connected' AND is_destination=true LIMIT 1`, [bookAs])).rows[0];
     if (dest) {
-      const host = (await q(`SELECT username FROM users WHERE id=$1`, [et.user_id])).rows[0];
+      const host = (await q(`SELECT username FROM users WHERE id=$1`, [bookAs])).rows[0];
       const evId = await G.createEvent(dest, {
         start_at: booking.start_at, end_at: booking.end_at,
         invitee_name: name, invitee_email: email,
@@ -789,8 +954,8 @@ app.post("/v1/public-bookings", async (c) => {
         [JSON.stringify({ google: { connectionId: dest.id, eventId: evId } }), booking.id]);
     }
   } catch (e) { console.error("calendar write-back:", e.message); }
-  sendBookingEmails({ ...booking, invitee_name: name, invitee_email: email, location: String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "") }, et, et.user_id).catch(() => {});
-  fireWebhooks(et.user_id, "booking.created", { bookingId: booking.id, eventType: et.slug, start: booking.start_at, end: booking.end_at, invitee: { name, email }, origin: agent || k?.key?.kind === "agent" ? "agent" : "human" });
+  sendBookingEmails({ ...booking, invitee_name: name, invitee_email: email, location: String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "") }, et, bookAs).catch(() => {});
+  fireWebhooks(bookAs, "booking.created", { bookingId: booking.id, eventType: et.slug, start: booking.start_at, end: booking.end_at, invitee: { name, email }, origin: agent || k?.key?.kind === "agent" ? "agent" : "human" });
   if (k?.key) logAgentAction(k.key, "booking.created", { eventType: et.slug, start: booking.start_at, invitee: email }).catch(() => {});
   const resp = { bookingId: booking.id, status: booking.status, start: booking.start_at, end: booking.end_at, cancelToken: booking.cancel_token, eventTitle: et.title };
   if (idem) await q(`INSERT INTO idempotency_keys (key, response) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [idem, JSON.stringify(resp)]);

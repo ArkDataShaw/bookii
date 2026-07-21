@@ -2,6 +2,7 @@
 (function () {
   const API = location.hostname === "localhost" ? "http://localhost:3000/v1" : "https://api.bookii.to/v1";
   const $ = (s, r) => (r || document).querySelector(s);
+  const encPath = s => String(s).split("/").map(encodeURIComponent).join("/");
   const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   let me = null;
 
@@ -46,10 +47,10 @@
   };
 
   /* ---------- router ---------- */
-  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "insights", "settings", "profile", "public", "cancel"];
+  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "teams", "team", "insights", "settings", "profile", "public", "cancel"];
   function show(view) {
     for (const v of VIEWS) $("#view-" + v).hidden = v !== view;
-    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "insights", "settings"];
+    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "teams", "team", "insights", "settings"];
     $("#app-nav").hidden = !appViews.includes(view);
     $("#userchip").hidden = !me || !(appViews.includes(view) || view === "onboarding");
     if (me && view === "onboarding") $("#userchip-name").textContent = me.name || me.email;
@@ -66,6 +67,10 @@
       const h = location.hash.replace(/^#\//, "").split("/").filter(Boolean);
       if (h[0] === "cancel" && h[1] && h[2]) return renderCancel(h[1], h[2]);
       if (h[0] === "reschedule" && h[1] && h[2]) return renderReschedule(h[1], h[2]);
+      if (p[0] === "team" && p[1]) {
+        if (p[2]) return renderPublic("team/" + p[1], p[2]);
+        return renderProfile("team/" + p[1]);
+      }
       if (p[0] && p[0] !== "app.html") {
         if (p[1]) return renderPublic(p[0], p[1]);
         return renderProfile(p[0]);
@@ -78,6 +83,10 @@
     if (parts[0] === "u" && parts[1]) {
       if (parts[2]) return renderPublic(parts[1], parts[2]);
       return renderProfile(parts[1]);
+    }
+    if (parts[0] === "t" && parts[1]) {
+      if (parts[2]) return renderPublic("team/" + parts[1], parts[2]);
+      return renderProfile("team/" + parts[1]);
     }
     if (parts[0] === "cancel" && parts[1] && parts[2]) return renderCancel(parts[1], parts[2]);
     if (parts[0] === "reschedule" && parts[1] && parts[2]) return renderReschedule(parts[1], parts[2]);
@@ -96,6 +105,8 @@
       case "calendars": return renderCalendars();
       case "settings": return renderSettings();
       case "insights": return renderInsights();
+      case "teams": return renderTeams();
+      case "team": return renderTeamDetail(parts[1]);
       case "event": return renderEditor(parts[1]);
       default: return renderDashboard();
     }
@@ -959,6 +970,126 @@
     } catch (e) { toast(e.message); }
   });
 
+  /* ---------- teams ---------- */
+  let curTeam = null;
+  async function renderTeams() {
+    show("teams");
+    const { teams } = await api("/teams");
+    const list = $("#tm-list");
+    list.innerHTML = "";
+    if (!teams.length) list.innerHTML = '<p class="et-empty">No teams yet — create one for your company.</p>';
+    for (const t of teams) {
+      const el = document.createElement("div");
+      el.className = "et-card pf-card";
+      el.innerHTML = `<div class="et-info">
+          <p class="et-title">${esc(t.name)} <span class="et-badge">${esc(t.role)}</span></p>
+          <p class="et-link">from.bookii.to/team/${esc(t.slug)}</p>
+        </div><span class="pf-arrow">→</span>`;
+      el.addEventListener("click", () => { location.hash = "#/team/" + t.id; });
+      list.appendChild(el);
+    }
+  }
+  $("#tm-new").addEventListener("click", () => { $("#tm-create").hidden = !$("#tm-create").hidden; });
+  $("#tm-name").addEventListener("input", () => {
+    $("#tm-slug").value = $("#tm-name").value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  });
+  $("#tm-create-go").addEventListener("click", async () => {
+    try {
+      const r = await api("/teams", { method: "POST", body: { name: $("#tm-name").value.trim(), slug: $("#tm-slug").value.trim() } });
+      $("#tm-create").hidden = true;
+      location.hash = "#/team/" + r.team.id;
+    } catch (e) { toast(e.message); }
+  });
+
+  async function renderTeamDetail(id) {
+    show("team");
+    const d = await api("/teams/" + id).catch(() => null);
+    if (!d) { location.hash = "#/teams"; return; }
+    curTeam = d;
+    $("#td-name").textContent = d.team.name;
+    $("#td-link").innerHTML = `<a href="https://from.bookii.to/team/${esc(d.team.slug)}" target="_blank" rel="noopener">from.bookii.to/team/${esc(d.team.slug)}</a>`;
+    // members
+    const mEl = $("#td-members");
+    mEl.innerHTML = "";
+    for (const m of d.members) {
+      const row = document.createElement("div");
+      row.className = "dk-row";
+      row.innerHTML = `<span class="dk-key">${esc(m.name || m.email)}</span>
+        <span class="dk-meta">${esc(m.email)} · ${esc(m.role)}</span>
+        ${m.role !== "owner" ? '<button class="range-x" aria-label="Remove">×</button>' : ""}`;
+      const x = row.querySelector("button");
+      if (x) x.addEventListener("click", async () => {
+        if (!confirm(`Remove ${m.name || m.email} from the team?`)) return;
+        await api(`/teams/${id}/members/${m.id}`, { method: "DELETE" }).catch(e => toast(e.message));
+        renderTeamDetail(id);
+      });
+      mEl.appendChild(row);
+    }
+    // host picker for new event
+    const hEl = $("#td-et-hosts");
+    hEl.innerHTML = "";
+    for (const m of d.members) {
+      const lab = document.createElement("label");
+      lab.className = "check-row small";
+      lab.innerHTML = `<input type="checkbox" value="${m.id}" checked> ${esc(m.name || m.email)}`;
+      hEl.appendChild(lab);
+    }
+    // team event types
+    const eEl = $("#td-ets");
+    eEl.innerHTML = "";
+    if (!d.eventTypes.length) eEl.innerHTML = '<p class="mut small">No team events yet.</p>';
+    for (const et of d.eventTypes) {
+      const url = `https://from.bookii.to/team/${d.team.slug}/${et.slug}`;
+      const hostNames = (et.host_ids || []).map(hid => {
+        const m = d.members.find(mm => mm.id === hid);
+        return m ? (m.name || m.email).split(" ")[0] : "?";
+      }).join(", ");
+      const el = document.createElement("div");
+      el.className = "et-card";
+      el.style.borderLeftColor = et.color;
+      el.innerHTML = `<div class="et-info">
+          <p class="et-title">${esc(et.title)} <span class="et-badge">${et.duration_min} min</span>
+            <span class="et-badge">${et.scheduling_type === "collective" ? "collective" : "round robin"}</span></p>
+          <p class="et-link">team/${esc(d.team.slug)}/${esc(et.slug)} · hosts: ${esc(hostNames)}</p>
+        </div>
+        <div class="et-actions">
+          <button class="btn btn-ghost btn-sm" data-act="copy">Copy link</button>
+          <a class="btn btn-ghost btn-sm" href="${url}" target="_blank" rel="noopener">View</a>
+          <a class="btn btn-primary btn-sm" href="#/event/${et.id}">Edit</a>
+        </div>`;
+      el.querySelector('[data-act=copy]').addEventListener("click", async () => {
+        await navigator.clipboard.writeText(url).catch(() => {});
+        toast("Link copied");
+      });
+      eEl.appendChild(el);
+    }
+  }
+  $("#td-et-create").addEventListener("click", async () => {
+    const hosts = [...document.querySelectorAll("#td-et-hosts input:checked")].map(i => i.value);
+    try {
+      await api(`/teams/${curTeam.team.id}/event-types`, { method: "POST", body: {
+        title: $("#td-et-title").value.trim(),
+        scheduling_type: $("#td-et-type").value,
+        duration_min: +$("#td-et-dur").value,
+        host_ids: hosts,
+      }});
+      $("#td-et-title").value = "";
+      toast("Team event created");
+      renderTeamDetail(curTeam.team.id);
+    } catch (e) { toast(e.message); }
+  });
+  $("#td-invite").addEventListener("click", async () => {
+    try {
+      const r = await api(`/teams/${curTeam.team.id}/members`, { method: "POST", body: {
+        email: $("#td-invite-email").value.trim(),
+        role: $("#td-invite-role").value,
+      }});
+      $("#td-invite-email").value = "";
+      toast(`Added ${r.member.name || r.member.email}`);
+      renderTeamDetail(curTeam.team.id);
+    } catch (e) { toast(e.message); }
+  });
+
   /* ---------- insights ---------- */
   const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   async function renderInsights() {
@@ -1041,7 +1172,9 @@
   async function renderProfile(username) {
     show("profile");
     try {
-      const { host, eventTypes } = await api("/pages/" + encodeURIComponent(username));
+      const data = await api("/pages/" + encPath(username));
+      const host = data.host || { name: data.team.name, username: "team/" + data.team.slug, welcome_note: data.team.bio };
+      const eventTypes = data.eventTypes;
       $("#pf-host").innerHTML = `
         <div class="host-avatar">${esc((host.name || host.username).slice(0, 2).toUpperCase())}</div>
         <h1 class="serif">${esc(host.name || host.username)}</h1>
@@ -1057,7 +1190,9 @@
             <p class="et-title">${esc(et.title)} <span class="et-badge">${et.duration_min} min</span></p>
             ${et.description ? `<p class="bk-note">${esc(et.description)}</p>` : ""}
           </div><span class="pf-arrow">→</span>`;
-        el.addEventListener("click", () => { location.hash = `#/u/${username}/${et.slug}`; });
+        el.addEventListener("click", () => {
+          location.hash = username.startsWith("team/") ? `#/t/${username.slice(5)}/${et.slug}` : `#/u/${username}/${et.slug}`;
+        });
         list.appendChild(el);
       }
     } catch {
@@ -1127,7 +1262,7 @@
       await loadPublicMonth(new Date());
     } catch (e) {
       let profileLink = null;
-      try { await api("/pages/" + encodeURIComponent(username)); profileLink = `#/u/${username}`; } catch {}
+      try { await api("/pages/" + encPath(username)); profileLink = `#/u/${username}`; } catch {}
       return renderPublicError(
         e.status === 404 ? "That booking page doesn't exist — the link may have changed." : (e.message || "Something went wrong."),
         profileLink);
@@ -1145,7 +1280,7 @@
   }
   async function loadPublicMonth(fromDate) {
     const fromKey = fromDate.toISOString().slice(0, 10);
-    pb.data = await api(`/pages/${encodeURIComponent(pb.username)}/${encodeURIComponent(pb.slug)}?from=${fromKey}&days=45`);
+    pb.data = await api(`/pages/${encPath(pb.username)}/${encodeURIComponent(pb.slug)}?from=${fromKey}&days=45`);
     pb.monthCursor = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
     const firstOpen = Object.entries(pb.data.days).find(([, s]) => s.length);
     pb.selectedDay = firstOpen ? firstOpen[0] : null;
@@ -1184,7 +1319,7 @@
     // look 45-90 days out for the first open day
     const from = new Date(Date.now() + 45 * 86400000);
     try {
-      const d = await api(`/pages/${encodeURIComponent(pb.username)}/${encodeURIComponent(pb.slug)}?from=${from.toISOString().slice(0, 10)}&days=45`);
+      const d = await api(`/pages/${encPath(pb.username)}/${encodeURIComponent(pb.slug)}?from=${from.toISOString().slice(0, 10)}&days=45`);
       const first = Object.entries(d.days).find(([, s]) => s.length);
       return first ? first[0] : null;
     } catch { return null; }
@@ -1371,7 +1506,7 @@
       `<a href="${links.google}" target="_blank" rel="noopener">Google</a> ·
        <a href="${links.outlook}" target="_blank" rel="noopener">Outlook</a> ·
        <a href="${links.yahoo}" target="_blank" rel="noopener">Yahoo</a>`;
-    $("#pb-book-another").href = `#/u/${pb.username}/${pb.slug}`;
+    $("#pb-book-another").href = pb.username.startsWith("team/") ? `#/t/${pb.username.slice(5)}/${pb.slug}` : `#/u/${pb.username}/${pb.slug}`;
     $("#pb-confirmed").hidden = false;
   }
   $("#pb-book-another").addEventListener("click", () => {

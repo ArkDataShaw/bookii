@@ -95,6 +95,69 @@ export async function computeSlots(eventType, schedule, fromMs, days, opts = {})
   return { tz, days: out };
 }
 
+/* Team slots: compute per-host (each host's default schedule + busy), then
+   union (round_robin — any host free) or intersect (collective — all free).
+   Returns { tz, days: { dateKey: [{start,end,hosts:[userId]}] } } */
+export async function computeTeamSlots(eventType, hostIds, fromMs, days, opts = {}) {
+  const perHost = [];
+  let tz = "UTC";
+  for (const uid of hostIds) {
+    const sched = (await q(
+      `SELECT * FROM schedules WHERE user_id=$1 ORDER BY is_default DESC, created_at LIMIT 1`, [uid])).rows[0];
+    if (!sched) continue;
+    tz = sched.timezone; // presentation tz = first host's; slots are ISO anyway
+    const r = await computeSlots({ ...eventType, user_id: uid }, sched, fromMs, days, opts);
+    perHost.push({ uid, days: r.days });
+  }
+  if (!perHost.length) return { tz, days: {} };
+  const out = {};
+  const allKeys = new Set(perHost.flatMap(h => Object.keys(h.days)));
+  for (const key of allKeys) {
+    const bag = new Map(); // startIso -> {start,end,hosts[]}
+    for (const h of perHost) {
+      for (const s of h.days[key] || []) {
+        const cur = bag.get(s.start) || { start: s.start, end: s.end, hosts: [] };
+        cur.hosts.push(h.uid);
+        bag.set(s.start, cur);
+      }
+    }
+    const need = eventType.scheduling_type === "collective" ? perHost.length : 1;
+    out[key] = [...bag.values()].filter(s => s.hosts.length >= need)
+      .sort((a, b) => a.start.localeCompare(b.start))
+      .map(s => ({ start: s.start, end: s.end }));
+  }
+  return { tz, days: out };
+}
+
+/* Which hosts are free at a specific start? */
+export async function hostsFreeAt(eventType, hostIds, startMs) {
+  const free = [];
+  for (const uid of hostIds) {
+    const sched = (await q(
+      `SELECT * FROM schedules WHERE user_id=$1 ORDER BY is_default DESC, created_at LIMIT 1`, [uid])).rows[0];
+    if (!sched) continue;
+    if (await slotIsAvailable({ ...eventType, user_id: uid }, sched, startMs)) free.push(uid);
+  }
+  return free;
+}
+
+/* Round-robin pick: among free hosts, highest priority wins; ties go to
+   least-recently-assigned. */
+export async function pickHost(eventType, freeHostIds) {
+  if (!freeHostIds.length) return null;
+  if (freeHostIds.length === 1) return freeHostIds[0];
+  const r = await q(
+    `SELECT h.user_id, h.priority, max(b.created_at) AS last_assigned
+     FROM event_type_hosts h
+     LEFT JOIN bookings b ON b.user_id = h.user_id AND b.event_type_id = h.event_type_id
+       AND b.status IN ('pending','confirmed','attended')
+     WHERE h.event_type_id=$1 AND h.user_id = ANY($2)
+     GROUP BY h.user_id, h.priority
+     ORDER BY h.priority DESC, last_assigned ASC NULLS FIRST
+     LIMIT 1`, [eventType.id, freeHostIds]);
+  return r.rows[0]?.user_id || freeHostIds[0];
+}
+
 /* Troubleshooter: explain a single day — rules, busy blocks, and each candidate slot's fate. */
 export async function explainDay(eventType, schedule, dateKey, opts = {}) {
   const tz = schedule.timezone;

@@ -240,3 +240,8 @@
 .in-bar{flex:1;height:10px;background:var(--paper);border-radius:5px;overflow:hidden}
 .in-bar-fill{height:100%;background:var(--blue);border-radius:5px}
 .in-bar-n{font-family:var(--font-m);font-size:.78rem;color:var(--ink-35);width:28px;text-align:right}
+
+/* teams */
+.td-new-et{display:flex;flex-direction:column;gap:.5rem;margin-top:.8rem;border-top:1px solid var(--rule);padding-top:.9rem}
+.td-new-et input[type=text],.td-new-et select{padding:.55rem .6rem;border-radius:8px;border:1.5px solid var(--rule);background:#fff;font-family:var(--font-b);font-size:.9rem}
+.td-hosts{display:flex;gap:.8rem;flex-wrap:wrap}

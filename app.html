@@ -21,6 +21,7 @@
     <a href="#/availability" data-nav="availability">Availability</a>
     <a href="#/meetings" data-nav="meetings">Meetings</a>
     <a href="#/calendars" data-nav="calendars">Calendars</a>
+    <a href="#/teams" data-nav="teams">Teams</a>
     <a href="#/insights" data-nav="insights">Insights</a>
     <a href="#/settings" data-nav="settings">Settings</a>
   </nav>
@@ -214,6 +215,60 @@
     <div class="pagehead"><h1 class="serif">Meetings</h1></div>
     <div class="sched-tabs" id="mt-tabs"></div>
     <div id="mt-list" class="host-bookings"></div>
+  </section>
+
+  <!-- TEAMS -->
+  <section id="view-teams" class="view" hidden>
+    <div class="pagehead">
+      <h1 class="serif">Teams</h1>
+      <button class="btn btn-primary" id="tm-new">+ New team</button>
+    </div>
+    <div id="tm-create" class="card" hidden>
+      <h3 class="card-title">Create a team</h3>
+      <label>Team name<input type="text" id="tm-name" maxlength="80" placeholder="ArkData"></label>
+      <label>Team link<span class="slug-claim">from.bookii.to/team/<input type="text" id="tm-slug" spellcheck="false"></span></label>
+      <button class="btn btn-primary" id="tm-create-go">Create team</button>
+    </div>
+    <div id="tm-list"></div>
+  </section>
+
+  <!-- TEAM DETAIL -->
+  <section id="view-team" class="view" hidden>
+    <div class="pagehead">
+      <div>
+        <p class="eyebrow"><a href="#/teams">← Teams</a></p>
+        <h1 class="serif" id="td-name"></h1>
+        <p class="mut" id="td-link"></p>
+      </div>
+    </div>
+    <div class="editor-grid">
+      <div>
+        <div class="card">
+          <h3 class="card-title">Team event types</h3>
+          <div id="td-ets" class="et-list"></div>
+          <div class="td-new-et">
+            <input type="text" id="td-et-title" placeholder="Event name" maxlength="80">
+            <select id="td-et-type">
+              <option value="round_robin">Round robin — one of us takes it</option>
+              <option value="collective">Collective — we all join</option>
+            </select>
+            <select id="td-et-dur"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select>
+            <div id="td-et-hosts" class="td-hosts"></div>
+            <button class="btn btn-primary btn-sm" id="td-et-create">Create</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 class="card-title">Members</h3>
+        <div id="td-members"></div>
+        <div class="dk-new">
+          <input type="email" id="td-invite-email" placeholder="teammate@arkdata.io">
+          <select id="td-invite-role"><option value="member">Member</option><option value="admin">Admin</option></select>
+          <button class="btn btn-ghost btn-sm" id="td-invite">Add</button>
+        </div>
+        <p class="mut small">Teammates need a Bookii account first (from.bookii.to).</p>
+      </div>
+    </div>
   </section>
 
   <!-- INSIGHTS -->

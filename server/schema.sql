@@ -185,3 +185,27 @@ CREATE TABLE IF NOT EXISTS agent_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_actions ON agent_actions(user_id, created_at DESC);
 ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminders_sent jsonb NOT NULL DEFAULT '{}';
+CREATE TABLE IF NOT EXISTS teams (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       text NOT NULL,
+  slug       text UNIQUE NOT NULL,
+  bio        text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS team_members (
+  team_id    uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       text NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (team_id, user_id)
+);
+ALTER TABLE event_types ADD COLUMN IF NOT EXISTS team_id uuid REFERENCES teams(id) ON DELETE CASCADE;
+ALTER TABLE event_types ADD COLUMN IF NOT EXISTS scheduling_type text NOT NULL DEFAULT 'solo' CHECK (scheduling_type IN ('solo','round_robin','collective'));
+CREATE TABLE IF NOT EXISTS event_type_hosts (
+  event_type_id uuid NOT NULL REFERENCES event_types(id) ON DELETE CASCADE,
+  user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  priority      int NOT NULL DEFAULT 2,
+  PRIMARY KEY (event_type_id, user_id)
+);
+-- team event slugs must be unique per team (user_id stays the creator)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_et_team_slug ON event_types(team_id, slug) WHERE team_id IS NOT NULL;
