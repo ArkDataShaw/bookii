@@ -5,6 +5,8 @@ import { q, pool, migrate } from "./db.js";
 import { hashPassword, verifyPassword, createSession, requireUser, RESERVED_USERNAMES, SLUG_RE } from "./auth.js";
 import { computeSlots, slotIsAvailable } from "./availability.js";
 import { isValidTz } from "./time.js";
+import * as G from "./google.js";
+import { encrypt, signState, verifyState } from "./crypto.js";
 
 const app = new Hono();
 
@@ -287,58 +289,95 @@ app.patch("/v1/bookings/:id/status", async (c) => {
   if (!["cancelled", "no_show", "attended", "confirmed"].includes(status)) return err(c, 400, "Bad status.");
   const r = await q(`UPDATE bookings SET status=$1 WHERE id=$2 AND user_id=$3 RETURNING id`, [status, c.req.param("id"), u.id]);
   if (!r.rows.length) return err(c, 404, "Booking not found.");
+  if (status === "cancelled") await removeExternalEvent(c.req.param("id"));
   return c.json({ ok: true });
 });
 
-/* ---------------- calendar connections (sync boundary) ---------------- */
-const OAUTH_READY = {
-  google: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-  microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET),
-};
+/* ---------------- calendar connections ---------------- */
+const APP_URL = "https://from.bookii.to";
 
 app.get("/v1/calendar-connections", async (c) => {
   const u = await requireUser(c);
   if (!u) return err(c, 401, "Sign in required.");
-  const r = await q(`SELECT id, provider, status, account_email, created_at FROM calendar_connections WHERE user_id=$1`, [u.id]);
-  return c.json({ connections: r.rows, providersReady: { ...OAUTH_READY, icloud: false } });
+  const r = await q(`SELECT id, provider, status, account_email, is_destination, created_at FROM calendar_connections WHERE user_id=$1 ORDER BY created_at`, [u.id]);
+  return c.json({
+    connections: r.rows,
+    providersReady: { google: G.googleReady(), microsoft: !!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET), icloud: false },
+  });
 });
 
-// OAuth start — fully wired; activates the moment env credentials exist.
 app.get("/v1/oauth/:provider/start", async (c) => {
   const u = await requireUser(c);
   if (!u) return err(c, 401, "Sign in required.");
   const p = c.req.param("provider");
   if (p === "google") {
-    if (!OAUTH_READY.google) return err(c, 503, "Google Calendar sync isn't configured yet. The app needs Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.searchParams.set("client_id", process.env.GOOGLE_CLIENT_ID);
-    url.searchParams.set("redirect_uri", process.env.GOOGLE_REDIRECT_URI || "https://api.bookii.to/v1/oauth/google/callback");
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy openid email");
-    url.searchParams.set("access_type", "offline");
-    url.searchParams.set("prompt", "consent");
-    url.searchParams.set("state", u.id);
-    return c.json({ url: url.toString() });
+    if (!G.googleReady()) return err(c, 503, "Google Calendar sync isn't configured yet. The app needs Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
+    return c.json({ url: G.authUrl(signState(u.id)) });
   }
   if (p === "microsoft") {
-    if (!OAUTH_READY.microsoft) return err(c, 503, "Microsoft calendar sync isn't configured yet. The app needs Entra OAuth credentials (MS_CLIENT_ID / MS_CLIENT_SECRET).");
+    if (!(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET)) return err(c, 503, "Microsoft calendar sync isn't configured yet. The app needs Entra OAuth credentials (MS_CLIENT_ID / MS_CLIENT_SECRET).");
     const url = new URL(`https://login.microsoftonline.com/${process.env.MS_TENANT || "common"}/oauth2/v2.0/authorize`);
     url.searchParams.set("client_id", process.env.MS_CLIENT_ID);
     url.searchParams.set("redirect_uri", process.env.MS_REDIRECT_URI || "https://api.bookii.to/v1/oauth/microsoft/callback");
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", "openid email offline_access https://graph.microsoft.com/Calendars.ReadWrite");
-    url.searchParams.set("state", u.id);
+    url.searchParams.set("state", signState(u.id));
     return c.json({ url: url.toString() });
   }
   return err(c, 400, "Unknown provider.");
 });
 
-app.get("/v1/oauth/:provider/callback", (c) =>
-  c.text("OAuth callback received. Token exchange activates when credentials are configured.", 501));
+app.get("/v1/oauth/google/callback", async (c) => {
+  const fail = (msg) => c.redirect(`${APP_URL}/app.html#/calendars?error=${encodeURIComponent(msg)}`);
+  if (c.req.query("error")) return fail(c.req.query("error"));
+  const userId = verifyState(c.req.query("state"));
+  if (!userId) return fail("Sign-in link expired — try connecting again.");
+  const code = c.req.query("code");
+  if (!code) return fail("Google didn't return a code.");
+  try {
+    const t = await G.exchangeCode(code);
+    // identify the account from the id_token payload (email claim)
+    let email = "";
+    if (t.id_token) {
+      try { email = JSON.parse(Buffer.from(t.id_token.split(".")[1], "base64url").toString()).email || ""; } catch {}
+    }
+    const isFirst = !(await q(`SELECT 1 FROM calendar_connections WHERE user_id=$1 AND is_destination=true`, [userId])).rows.length;
+    await q(
+      `INSERT INTO calendar_connections (user_id, provider, status, account_email, enc_access_token, enc_refresh_token, access_expires_at, scopes, is_destination)
+       VALUES ($1,'google','connected',$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (user_id, provider, account_email) DO UPDATE SET
+         status='connected', enc_access_token=EXCLUDED.enc_access_token,
+         enc_refresh_token=COALESCE(EXCLUDED.enc_refresh_token, calendar_connections.enc_refresh_token),
+         access_expires_at=EXCLUDED.access_expires_at, scopes=EXCLUDED.scopes`,
+      [userId, email, encrypt(t.access_token), t.refresh_token ? encrypt(t.refresh_token) : null,
+        new Date(Date.now() + (t.expires_in || 3600) * 1000).toISOString(), t.scope || "", isFirst]);
+    return c.redirect(`${APP_URL}/app.html#/calendars?connected=google`);
+  } catch (e) {
+    console.error("google callback:", e.message);
+    return fail("Couldn't finish connecting Google — try again.");
+  }
+});
+
+app.get("/v1/oauth/microsoft/callback", (c) =>
+  c.text("Microsoft sync activates when Entra credentials are configured.", 501));
+
+app.patch("/v1/calendar-connections/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const b = await c.req.json().catch(() => ({}));
+  if (b.is_destination === true) {
+    await q(`UPDATE calendar_connections SET is_destination=false WHERE user_id=$1`, [u.id]);
+    const r = await q(`UPDATE calendar_connections SET is_destination=true WHERE id=$1 AND user_id=$2 RETURNING id`, [c.req.param("id"), u.id]);
+    if (!r.rows.length) return err(c, 404, "Connection not found.");
+  }
+  return c.json({ ok: true });
+});
 
 app.delete("/v1/calendar-connections/:id", async (c) => {
   const u = await requireUser(c);
   if (!u) return err(c, 401, "Sign in required.");
+  const r = await q(`SELECT * FROM calendar_connections WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
+  if (r.rows[0]?.provider === "google") await G.revoke(r.rows[0]);
   await q(`DELETE FROM calendar_connections WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
   return c.json({ ok: true });
 });
@@ -448,16 +487,41 @@ app.post("/v1/public-bookings", async (c) => {
     throw e;
   }
   client.release();
+  // write to the host's destination calendar (best effort — booking stands regardless)
+  try {
+    const dest = (await q(`SELECT * FROM calendar_connections WHERE user_id=$1 AND provider='google' AND status='connected' AND is_destination=true LIMIT 1`, [et.user_id])).rows[0];
+    if (dest) {
+      const host = (await q(`SELECT username FROM users WHERE id=$1`, [et.user_id])).rows[0];
+      const evId = await G.createEvent(dest, {
+        start_at: booking.start_at, end_at: booking.end_at,
+        invitee_name: name, invitee_email: email,
+        note: Object.values(answers || {}).join(" · "),
+      }, et, host);
+      await q(`UPDATE bookings SET external_refs = external_refs || $1 WHERE id=$2`,
+        [JSON.stringify({ google: { connectionId: dest.id, eventId: evId } }), booking.id]);
+    }
+  } catch (e) { console.error("calendar write-back:", e.message); }
   const resp = { bookingId: booking.id, status: booking.status, start: booking.start_at, end: booking.end_at, cancelToken: booking.cancel_token, eventTitle: et.title };
   if (idem) await q(`INSERT INTO idempotency_keys (key, response) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [idem, JSON.stringify(resp)]);
   return c.json(resp, 201);
 });
+
+async function removeExternalEvent(bookingId) {
+  try {
+    const b = (await q(`SELECT external_refs FROM bookings WHERE id=$1`, [bookingId])).rows[0];
+    const ref = b?.external_refs?.google;
+    if (!ref) return;
+    const conn = (await q(`SELECT * FROM calendar_connections WHERE id=$1`, [ref.connectionId])).rows[0];
+    if (conn) await G.deleteEvent(conn, ref.eventId);
+  } catch (e) { console.error("calendar event delete:", e.message); }
+}
 
 app.post("/v1/public-bookings/:id/cancel", async (c) => {
   const { cancelToken } = await c.req.json().catch(() => ({}));
   const r = await q(`UPDATE bookings SET status='cancelled' WHERE id=$1 AND cancel_token=$2 AND status IN ('pending','confirmed') RETURNING id`,
     [c.req.param("id"), cancelToken || ""]);
   if (!r.rows.length) return err(c, 404, "Booking not found (or already cancelled).");
+  await removeExternalEvent(c.req.param("id"));
   return c.json({ ok: true });
 });
 

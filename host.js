@@ -591,6 +591,11 @@
   /* ---------- calendars ---------- */
   async function renderCalendars() {
     show("calendars");
+    // OAuth redirect outcome (e.g. #/calendars?connected=google)
+    const qs = (location.hash.split("?")[1] || "");
+    const params = new URLSearchParams(qs);
+    if (params.get("connected")) { toast("Calendar connected"); history.replaceState(null, "", "#/calendars"); }
+    if (params.get("error")) { toast(params.get("error")); history.replaceState(null, "", "#/calendars"); }
     const { connections, providersReady } = await api("/calendar-connections");
     const provs = [
       { id: "google", name: "Google Calendar", logo: "📅", desc: "Gmail and Google Workspace calendars. Busy times sync in, bookings write back." },
@@ -600,18 +605,25 @@
     const grid = $("#cal-providers");
     grid.innerHTML = "";
     for (const p of provs) {
-      const conn = connections.find(c => c.provider === p.id);
+      const conns = connections.filter(c => c.provider === p.id);
       const ready = providersReady[p.id];
       const el = document.createElement("div");
       el.className = "prov-card";
+      let body = "";
+      for (const conn of conns) {
+        const reauth = conn.status === "needs_reauth";
+        body += `<div class="conn-row">
+          <span class="prov-state ${reauth ? "waiting" : "ready"}">${reauth ? "needs reconnect" : "connected"} · ${esc(conn.account_email || "account")}</span>
+          <label class="check-row small"><input type="radio" name="dest" data-dest="${conn.id}" ${conn.is_destination ? "checked" : ""}> bookings write here</label>
+          <button class="linklike danger" data-disc="${conn.id}">Disconnect</button>
+        </div>`;
+      }
+      if (ready) body += `<button class="btn btn-primary btn-sm prov-btn" data-p="${p.id}">${conns.length ? "Connect another account" : "Connect"}</button>`;
+      else if (!conns.length) body += `<span class="prov-state waiting">ready to wire · awaiting ${p.id === "icloud" ? "launch" : "OAuth credentials"}</span>`;
       el.innerHTML = `
         <div class="prov-logo" aria-hidden="true">${p.logo}</div>
         <h3 class="serif">${p.name}</h3>
-        <p class="mut">${p.desc}</p>
-        ${conn ? `<span class="prov-state ready">connected · ${esc(conn.account_email)}</span>` :
-          ready ? `<button class="btn btn-primary btn-sm prov-btn" data-p="${p.id}">Connect</button>` :
-          `<span class="prov-state waiting">ready to wire · awaiting ${p.id === "icloud" ? "launch" : "OAuth credentials"}</span>`}
-      `;
+        <p class="mut">${p.desc}</p>${body}`;
       const btn = el.querySelector("[data-p]");
       if (btn) btn.addEventListener("click", async () => {
         try {
@@ -619,6 +631,16 @@
           location.href = r.url;
         } catch (e) { toast(e.message); }
       });
+      el.querySelectorAll("[data-dest]").forEach(radio => radio.addEventListener("change", async () => {
+        await api(`/calendar-connections/${radio.dataset.dest}`, { method: "PATCH", body: { is_destination: true } }).catch(e => toast(e.message));
+        toast("Destination updated");
+        renderCalendars();
+      }));
+      el.querySelectorAll("[data-disc]").forEach(b => b.addEventListener("click", async () => {
+        if (!confirm("Disconnect this calendar? Its busy times will stop blocking your availability.")) return;
+        await api(`/calendar-connections/${b.dataset.disc}`, { method: "DELETE" }).catch(e => toast(e.message));
+        renderCalendars();
+      }));
       grid.appendChild(el);
     }
   }

@@ -164,3 +164,7 @@
   .et-card{flex-direction:column;align-items:flex-start}
   .userchip span{display:none}
 }
+
+/* calendar connection rows */
+.conn-row{display:flex;flex-direction:column;gap:.35rem;border-top:1px solid var(--rule);padding:.7rem 0;margin-top:.7rem}
+.conn-row .prov-state{margin-top:0;align-self:flex-start}

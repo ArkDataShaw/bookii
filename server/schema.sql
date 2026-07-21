@@ -75,11 +75,15 @@ CREATE TABLE IF NOT EXISTS calendar_connections (
   provider      text NOT NULL CHECK (provider IN ('google','microsoft','icloud')),
   status        text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','connected','needs_reauth','error')),
   account_email text NOT NULL DEFAULT '',
-  -- credential columns intentionally absent until OAuth credentials are configured;
-  -- added via migration when real sync lands (encrypted_access_token, encrypted_refresh_token, ...)
   created_at    timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, provider, account_email)
 );
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS enc_access_token  text;
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS enc_refresh_token text;
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS access_expires_at timestamptz;
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS scopes            text NOT NULL DEFAULT '';
+ALTER TABLE calendar_connections ADD COLUMN IF NOT EXISTS is_destination    boolean NOT NULL DEFAULT false;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS external_refs jsonb NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS bookings (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
