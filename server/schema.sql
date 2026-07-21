@@ -138,3 +138,50 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
   expires_at timestamptz NOT NULL,
   used_at    timestamptz
 );
+CREATE TABLE IF NOT EXISTS api_keys (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       text NOT NULL DEFAULT '',
+  key_hash   text NOT NULL,           -- sha256 of full key
+  prefix     text NOT NULL,           -- bk_live_xxxx (display)
+  last4      text NOT NULL,
+  scopes     text[] NOT NULL DEFAULT '{read-availability,create-booking}',
+  kind       text NOT NULL DEFAULT 'api' CHECK (kind IN ('api','agent')),
+  agent_name text,
+  last_used  timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+
+CREATE TABLE IF NOT EXISTS webhooks (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  url        text NOT NULL,
+  events     text[] NOT NULL DEFAULT '{booking.created,booking.cancelled,booking.rescheduled}',
+  secret     text NOT NULL,
+  active     boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  webhook_id  uuid NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  event       text NOT NULL,
+  payload     jsonb NOT NULL,
+  status_code int,
+  response    text,
+  ok          boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_wh_deliveries ON webhook_deliveries(webhook_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_actions (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key_id     uuid REFERENCES api_keys(id) ON DELETE SET NULL,
+  action     text NOT NULL,
+  detail     jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_actions ON agent_actions(user_id, created_at DESC);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS reminders_sent jsonb NOT NULL DEFAULT '{}';

@@ -214,3 +214,29 @@
 /* embed generator */
 .embed-tabs{margin-bottom:.6rem}
 .embed-code{background:var(--ink);color:#C9CDDC;border-radius:10px;padding:.9rem 1rem;font-family:var(--font-m);font-size:.72rem;white-space:pre-wrap;word-break:break-all;line-height:1.55}
+
+/* developer section */
+.dk-list{margin-bottom:.8rem}
+.dk-row{display:flex;align-items:center;gap:.7rem;padding:.5rem 0;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.dk-key{font-family:var(--font-m);font-size:.78rem;color:var(--ink);word-break:break-all}
+.dk-meta{font-size:.75rem;color:var(--ink-35);flex:1}
+.dk-new{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.6rem}
+.dk-new input[type=text],.dk-new input[type=url]{flex:1;min-width:180px}
+.dk-secret{background:var(--ink);color:#C9CDDC;border-radius:10px;padding:.8rem 1rem;margin-top:.7rem}
+.dk-secret code{font-family:var(--font-m);font-size:.75rem;word-break:break-all;color:#7ED9A7}
+.dk-secret .mut{color:#9BA3BC !important}
+.dk-secret .linklike{color:#8FA0FF}
+.wh-row{margin-bottom:.7rem}
+.wh-row code{font-family:var(--font-m);font-size:.7rem;background:var(--paper);border:1px solid var(--rule);border-radius:5px;padding:.1em .35em;word-break:break-all}
+.wh-log{border-left:2px solid var(--rule);padding-left:.8rem;margin:.4rem 0}
+
+/* insights */
+.in-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.8rem;margin-bottom:1.4rem}
+.in-tile{background:var(--paper-2);border:1px solid var(--rule);border-radius:14px;padding:1rem 1.2rem;text-align:center}
+.in-num{font-family:var(--font-d);font-size:2rem;font-weight:600;margin:0}
+.in-lbl{font-family:var(--font-m);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-35);margin:.2rem 0 0}
+.in-bar-row{display:flex;align-items:center;gap:.7rem;margin:.45rem 0}
+.in-bar-lbl{width:110px;font-size:.85rem;font-weight:600;color:var(--ink-60);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.in-bar{flex:1;height:10px;background:var(--paper);border-radius:5px;overflow:hidden}
+.in-bar-fill{height:100%;background:var(--blue);border-radius:5px}
+.in-bar-n{font-family:var(--font-m);font-size:.78rem;color:var(--ink-35);width:28px;text-align:right}

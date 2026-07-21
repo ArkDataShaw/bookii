@@ -7,8 +7,28 @@ import { computeSlots, slotIsAvailable, explainDay } from "./availability.js";
 import { isValidTz } from "./time.js";
 import * as G from "./google.js";
 import { encrypt, signState, verifyState } from "./crypto.js";
-import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails, sendMagicLink, sendPasswordReset, emailReady } from "./email.js";
-import { randomBytes } from "crypto";
+import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails, sendMagicLink, sendPasswordReset, sendReminder, emailReady } from "./email.js";
+import { fireWebhooks, deliver } from "./webhooks.js";
+import { randomBytes, createHash } from "crypto";
+
+const sha256 = s => createHash("sha256").update(s).digest("hex");
+/* Resolve an api/agent key from Authorization: Bearer bk_... */
+async function requireKey(c, scope) {
+  const auth = c.req.header("Authorization") || "";
+  const raw = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!raw.startsWith("bk_")) return null;
+  const r = await q(`SELECT * FROM api_keys WHERE key_hash=$1`, [sha256(raw)]);
+  const key = r.rows[0];
+  if (!key) return null;
+  if (scope && !key.scopes.includes(scope)) return { key, denied: true };
+  q(`UPDATE api_keys SET last_used=now() WHERE id=$1`, [key.id]).catch(() => {});
+  return { key };
+}
+async function logAgentAction(key, action, detail) {
+  if (key.kind !== "agent") return;
+  await q(`INSERT INTO agent_actions (user_id, key_id, action, detail) VALUES ($1,$2,$3,$4)`,
+    [key.user_id, key.id, action, JSON.stringify(detail || {})]).catch(() => {});
+}
 
 const app = new Hono();
 
@@ -346,6 +366,116 @@ app.delete("/v1/event-types/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+/* ---------------- API keys & agent tokens ---------------- */
+const VALID_SCOPES = ["read-availability", "create-booking", "manage-bookings", "manage-event-types"];
+
+app.get("/v1/api-keys", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const r = await q(`SELECT id, name, prefix, last4, scopes, kind, agent_name, last_used, created_at FROM api_keys WHERE user_id=$1 ORDER BY created_at DESC`, [u.id]);
+  return c.json({ keys: r.rows });
+});
+
+app.post("/v1/api-keys", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const b = await c.req.json().catch(() => ({}));
+  const kind = b.kind === "agent" ? "agent" : "api";
+  const scopes = Array.isArray(b.scopes) ? b.scopes.filter(s => VALID_SCOPES.includes(s)) : ["read-availability", "create-booking"];
+  if (!scopes.length) return err(c, 400, "Pick at least one scope.");
+  const raw = `bk_${kind === "agent" ? "agent" : "live"}_${randomBytes(24).toString("hex")}`;
+  const r = await q(
+    `INSERT INTO api_keys (user_id, name, key_hash, prefix, last4, scopes, kind, agent_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, name, prefix, last4, scopes, kind, agent_name, created_at`,
+    [u.id, String(b.name || (kind === "agent" ? "Agent" : "API key")).slice(0, 60), sha256(raw),
+      raw.slice(0, 11), raw.slice(-4), scopes, kind, b.agent_name ? String(b.agent_name).slice(0, 60) : null]);
+  return c.json({ key: r.rows[0], secret: raw }, 201); // full secret shown once
+});
+
+app.delete("/v1/api-keys/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  await q(`DELETE FROM api_keys WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
+  return c.json({ ok: true });
+});
+
+app.get("/v1/agent-actions", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const r = await q(
+    `SELECT a.action, a.detail, a.created_at, k.agent_name, k.name AS key_name
+     FROM agent_actions a LEFT JOIN api_keys k ON k.id=a.key_id
+     WHERE a.user_id=$1 ORDER BY a.created_at DESC LIMIT 100`, [u.id]);
+  return c.json({ actions: r.rows });
+});
+
+/* ---------------- webhooks ---------------- */
+app.get("/v1/webhooks", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const r = await q(`SELECT id, url, events, secret, active, created_at FROM webhooks WHERE user_id=$1 ORDER BY created_at`, [u.id]);
+  return c.json({ webhooks: r.rows });
+});
+
+const WH_EVENTS = ["booking.created", "booking.cancelled", "booking.rescheduled", "booking.no_show"];
+
+app.post("/v1/webhooks", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const b = await c.req.json().catch(() => ({}));
+  if (!/^https:\/\/.+/.test(b.url || "")) return err(c, 400, "Webhook URL must be https.");
+  const events = (Array.isArray(b.events) ? b.events : WH_EVENTS).filter(e => WH_EVENTS.includes(e));
+  if (!events.length) return err(c, 400, "Pick at least one event.");
+  const r = await q(
+    `INSERT INTO webhooks (user_id, url, events, secret) VALUES ($1,$2,$3,$4) RETURNING id, url, events, secret, active, created_at`,
+    [u.id, b.url.slice(0, 500), events, "whsec_" + randomBytes(24).toString("hex")]);
+  return c.json({ webhook: r.rows[0] }, 201);
+});
+
+app.patch("/v1/webhooks/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const b = await c.req.json().catch(() => ({}));
+  if (b.active !== undefined) await q(`UPDATE webhooks SET active=$1 WHERE id=$2 AND user_id=$3`, [!!b.active, c.req.param("id"), u.id]);
+  return c.json({ ok: true });
+});
+
+app.delete("/v1/webhooks/:id", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  await q(`DELETE FROM webhooks WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
+  return c.json({ ok: true });
+});
+
+app.post("/v1/webhooks/:id/test", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const h = (await q(`SELECT * FROM webhooks WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id])).rows[0];
+  if (!h) return err(c, 404, "Webhook not found.");
+  const result = await deliver(h, "ping", { message: "Test delivery from Bookii", at: new Date().toISOString() });
+  return c.json(result);
+});
+
+app.get("/v1/webhooks/:id/deliveries", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const own = await q(`SELECT id FROM webhooks WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id]);
+  if (!own.rows.length) return err(c, 404, "Webhook not found.");
+  const r = await q(`SELECT id, event, status_code, ok, response, created_at FROM webhook_deliveries WHERE webhook_id=$1 ORDER BY created_at DESC LIMIT 30`, [c.req.param("id")]);
+  return c.json({ deliveries: r.rows });
+});
+
+app.post("/v1/webhooks/:id/deliveries/:did/replay", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const h = (await q(`SELECT * FROM webhooks WHERE id=$1 AND user_id=$2`, [c.req.param("id"), u.id])).rows[0];
+  if (!h) return err(c, 404, "Webhook not found.");
+  const d = (await q(`SELECT * FROM webhook_deliveries WHERE id=$1 AND webhook_id=$2`, [c.req.param("did"), h.id])).rows[0];
+  if (!d) return err(c, 404, "Delivery not found.");
+  const result = await deliver(h, d.event, d.payload);
+  return c.json(result);
+});
+
 /* ---------------- billing ---------------- */
 app.get("/v1/billing", async (c) => {
   const u = await requireUser(c);
@@ -373,6 +503,33 @@ app.get("/v1/admin/lookup", async (c) => {
     q(`SELECT status, count(*)::int AS n FROM bookings WHERE user_id=$1 GROUP BY status`, [u.id]),
   ]);
   return c.json({ found: true, user: u, eventTypes: ets.rows, schedules: scheds.rows, connections: conns.rows, bookingStats: stats.rows });
+});
+
+/* ---------------- insights ---------------- */
+app.get("/v1/insights", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const [byStatus, byEvent, byDow, byOrigin, recent] = await Promise.all([
+    q(`SELECT status, count(*)::int AS n FROM bookings WHERE user_id=$1 AND created_at > now() - interval '90 days' GROUP BY status`, [u.id]),
+    q(`SELECT et.title, count(*)::int AS n FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+       WHERE b.user_id=$1 AND b.created_at > now() - interval '90 days' GROUP BY et.title ORDER BY n DESC LIMIT 8`, [u.id]),
+    q(`SELECT extract(dow FROM start_at AT TIME ZONE $2)::int AS dow, count(*)::int AS n FROM bookings
+       WHERE user_id=$1 AND status != 'cancelled' AND created_at > now() - interval '90 days' GROUP BY dow ORDER BY dow`, [u.id, u.timezone]),
+    q(`SELECT origin, count(*)::int AS n FROM bookings WHERE user_id=$1 AND created_at > now() - interval '90 days' GROUP BY origin`, [u.id]),
+    q(`SELECT count(*)::int AS n FROM bookings WHERE user_id=$1 AND created_at > now() - interval '7 days'`, [u.id]),
+  ]);
+  const s = Object.fromEntries(byStatus.rows.map(r => [r.status, r.n]));
+  const attended = s.attended || 0, noShow = s.no_show || 0;
+  const showRate = attended + noShow > 0 ? Math.round(100 * attended / (attended + noShow)) : null;
+  return c.json({
+    windowDays: 90,
+    totals: { booked: Object.values(s).reduce((a, b) => a + b, 0), ...s },
+    showRate,
+    last7Days: recent.rows[0].n,
+    byEvent: byEvent.rows,
+    byWeekday: byDow.rows,
+    byOrigin: byOrigin.rows,
+  });
 });
 
 /* ---------------- troubleshooter ---------------- */
@@ -406,9 +563,11 @@ app.patch("/v1/bookings/:id/status", async (c) => {
   if (!["cancelled", "no_show", "attended", "confirmed"].includes(status)) return err(c, 400, "Bad status.");
   const r = await q(`UPDATE bookings SET status=$1 WHERE id=$2 AND user_id=$3 RETURNING id`, [status, c.req.param("id"), u.id]);
   if (!r.rows.length) return err(c, 404, "Booking not found.");
+  if (status === "no_show") fireWebhooks(u.id, "booking.no_show", { bookingId: c.req.param("id") });
   if (status === "cancelled") {
     await removeExternalEvent(c.req.param("id"));
     sendCancellationEmails(c.req.param("id"), "the host").catch(() => {});
+    fireWebhooks(u.id, "booking.cancelled", { bookingId: c.req.param("id"), by: "host" });
   }
   return c.json({ ok: true });
 });
@@ -543,6 +702,8 @@ app.get("/v1/pages/:username/:slug", async (c) => {
 });
 
 app.post("/v1/holds", async (c) => {
+  const k = await requireKey(c, "create-booking");
+  if (k?.denied) return err(c, 403, "This key doesn't have the create-booking scope.");
   const { eventTypeId, start } = await c.req.json().catch(() => ({}));
   const startMs = Date.parse(start || "");
   if (!eventTypeId || !startMs) return err(c, 400, "eventTypeId and start (ISO) required.");
@@ -556,10 +717,13 @@ app.post("/v1/holds", async (c) => {
   const r = await q(
     `INSERT INTO holds (event_type_id, user_id, start_at, end_at, expires_at) VALUES ($1,$2,$3,$4, now() + interval '${HOLD_TTL_S} seconds') RETURNING id, expires_at`,
     [et.id, et.user_id, new Date(startMs).toISOString(), new Date(endMs).toISOString()]);
+  if (k?.key) logAgentAction(k.key, "hold.created", { eventType: et.slug, start }).catch(() => {});
   return c.json({ holdId: r.rows[0].id, expiresAt: r.rows[0].expires_at }, 201);
 });
 
 app.post("/v1/public-bookings", async (c) => {
+  const k = await requireKey(c, "create-booking");
+  if (k?.denied) return err(c, 403, "This key doesn't have the create-booking scope.");
   const idem = c.req.header("Idempotency-Key");
   if (idem) {
     const hit = await q(`SELECT response FROM idempotency_keys WHERE key=$1`, [idem]);
@@ -624,6 +788,8 @@ app.post("/v1/public-bookings", async (c) => {
     }
   } catch (e) { console.error("calendar write-back:", e.message); }
   sendBookingEmails({ ...booking, invitee_name: name, invitee_email: email, location: String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "") }, et, et.user_id).catch(() => {});
+  fireWebhooks(et.user_id, "booking.created", { bookingId: booking.id, eventType: et.slug, start: booking.start_at, end: booking.end_at, invitee: { name, email }, origin: agent || k?.key?.kind === "agent" ? "agent" : "human" });
+  if (k?.key) logAgentAction(k.key, "booking.created", { eventType: et.slug, start: booking.start_at, invitee: email }).catch(() => {});
   const resp = { bookingId: booking.id, status: booking.status, start: booking.start_at, end: booking.end_at, cancelToken: booking.cancel_token, eventTitle: et.title };
   if (idem) await q(`INSERT INTO idempotency_keys (key, response) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [idem, JSON.stringify(resp)]);
   return c.json(resp, 201);
@@ -699,6 +865,7 @@ app.post("/v1/public-bookings/:id/reschedule", async (c) => {
     }
   } catch (e) { console.error("reschedule calendar sync:", e.message); }
   sendRescheduleEmails(b.id, b.start_at.toISOString()).catch(() => {});
+  fireWebhooks(et.user_id, "booking.rescheduled", { bookingId: b.id, former: b.start_at, start: new Date(startMs).toISOString() });
   return c.json({ ok: true, start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() });
 });
 
@@ -717,14 +884,37 @@ app.post("/v1/public-bookings/:id/cancel", async (c) => {
   if (!r.rows.length) return err(c, 404, "Booking not found (or already cancelled).");
   await removeExternalEvent(c.req.param("id"));
   sendCancellationEmails(c.req.param("id"), "the invitee").catch(() => {});
+  q(`SELECT user_id FROM bookings WHERE id=$1`, [c.req.param("id")]).then(rr => rr.rows[0] && fireWebhooks(rr.rows[0].user_id, "booking.cancelled", { bookingId: c.req.param("id"), by: "invitee" })).catch(() => {});
   return c.json({ ok: true });
 });
+
+/* ---------------- reminder loop ---------------- */
+async function sendDueReminders() {
+  // windows: 24h (23h-25h out, not sent) and 1h (50-70min out, not sent)
+  const windows = [
+    ["24h", "tomorrow", "start_at BETWEEN now() + interval '23 hours' AND now() + interval '25 hours'", "r24"],
+    ["1h", "in about an hour", "start_at BETWEEN now() + interval '50 minutes' AND now() + interval '70 minutes'", "r1"],
+  ];
+  for (const [, label, cond, flag] of windows) {
+    const rows = (await q(
+      `SELECT b.id, b.start_at, b.end_at, b.invitee_email, b.location, b.cancel_token,
+              et.title, u.name AS host_name, u.username, u.timezone
+       FROM bookings b JOIN event_types et ON et.id=b.event_type_id JOIN users u ON u.id=b.user_id
+       WHERE b.status='confirmed' AND ${cond} AND NOT (b.reminders_sent ? '${flag}') LIMIT 50`)).rows;
+    for (const b of rows) {
+      await q(`UPDATE bookings SET reminders_sent = reminders_sent || $1 WHERE id=$2`,
+        [JSON.stringify({ [flag]: new Date().toISOString() }), b.id]);
+      sendReminder(b, label).catch(() => {});
+    }
+  }
+}
 
 /* ---------------- boot ---------------- */
 const port = +(process.env.PORT || 3000);
 migrate().then(() => {
   setInterval(() => q(`DELETE FROM holds WHERE expires_at < now() - interval '1 hour'`).catch(() => {}), 600000);
   setInterval(() => q(`DELETE FROM idempotency_keys WHERE created_at < now() - interval '1 day'`).catch(() => {}), 3600000);
+  setInterval(() => sendDueReminders().catch(e => console.error("reminders:", e.message)), 300000);
   serve({ fetch: app.fetch, port });
   console.log("bookii-api listening on :" + port);
 });

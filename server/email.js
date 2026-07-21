@@ -54,6 +54,17 @@ async function hostWants(userId, kind) {
   return u;
 }
 
+export async function sendReminder(bookingRow, label) {
+  const b = bookingRow;
+  return send(b.invitee_email,
+    `Reminder: ${b.title} ${label} — ${new Intl.DateTimeFormat("en-US", { timeZone: b.timezone, hour: "numeric", minute: "2-digit" }).format(new Date(b.start_at))}`,
+    layout(`<p style="margin:0 0 4px;color:#2B3EE5;font-size:13px;font-weight:600">Coming up ${label}</p>
+      <h2 style="font-family:Georgia,serif;margin:0 0 12px;font-size:22px">${esc(b.title)} with ${esc(b.host_name || b.username)}</h2>
+      ${whenBlock(b.start_at, b.end_at, b.timezone, b.timezone)}
+      ${b.location ? `<p style="font-size:14px;color:#6b6e78;margin-top:10px">Where: ${esc(b.location)}</p>` : ""}
+      ${links(b)}`));
+}
+
 /* ------- auth emails ------- */
 export async function sendMagicLink(to, url) {
   return send(to, "Your Bookii sign-in link",

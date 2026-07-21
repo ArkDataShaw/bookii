@@ -46,10 +46,10 @@
   };
 
   /* ---------- router ---------- */
-  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "settings", "profile", "public", "cancel"];
+  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "insights", "settings", "profile", "public", "cancel"];
   function show(view) {
     for (const v of VIEWS) $("#view-" + v).hidden = v !== view;
-    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "settings"];
+    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "insights", "settings"];
     $("#app-nav").hidden = !appViews.includes(view);
     $("#userchip").hidden = !me || !(appViews.includes(view) || view === "onboarding");
     if (me && view === "onboarding") $("#userchip-name").textContent = me.name || me.email;
@@ -95,6 +95,7 @@
       case "meetings": return renderMeetings();
       case "calendars": return renderCalendars();
       case "settings": return renderSettings();
+      case "insights": return renderInsights();
       case "event": return renderEditor(parts[1]);
       default: return renderDashboard();
     }
@@ -781,6 +782,9 @@
     $("#st-n-booked").checked = np.booked !== false;
     $("#st-n-cancelled").checked = np.cancelled !== false;
     $("#st-n-digest").checked = np.digest === true;
+    renderDevKeys().catch(() => {});
+    renderWebhooks().catch(() => {});
+    renderAgentLog().catch(() => {});
     api("/billing").then(b => {
       $("#st-billing").innerHTML = `
         <p style="margin:0 0 .3rem"><span class="prov-state ready">${esc(b.planLabel)}</span></p>
@@ -830,6 +834,119 @@
       $("#st-error").hidden = false;
     }
   });
+  /* ---------- developer: keys, agents, webhooks ---------- */
+  async function renderDevKeys() {
+    const { keys } = await api("/api-keys");
+    const fill = (sel, kind) => {
+      const el = $(sel);
+      el.innerHTML = "";
+      const mine = keys.filter(kk => kk.kind === kind);
+      if (!mine.length) el.innerHTML = '<p class="mut small">None yet.</p>';
+      for (const kk of mine) {
+        const row = document.createElement("div");
+        row.className = "dk-row";
+        const used = kk.last_used ? new Date(kk.last_used).toLocaleDateString() : "never used";
+        row.innerHTML = `<span class="dk-key">${esc(kk.prefix)}…${esc(kk.last4)}</span>
+          <span class="dk-meta">${esc(kk.agent_name || kk.name)} · ${kk.scopes.map(esc).join(", ")} · ${used}</span>
+          <button class="range-x" aria-label="Revoke">×</button>`;
+        row.querySelector("button").addEventListener("click", async () => {
+          if (!confirm("Revoke this key? Anything using it stops working immediately.")) return;
+          await api("/api-keys/" + kk.id, { method: "DELETE" }).catch(e => toast(e.message));
+          renderDevKeys();
+        });
+        el.appendChild(row);
+      }
+    };
+    fill("#dk-list", "api");
+    fill("#ag-list", "agent");
+  }
+  function showSecret(sel, secret) {
+    const el = $(sel);
+    el.innerHTML = `<p class="mut small">Copy this now — it won't be shown again.</p>
+      <code>${esc(secret)}</code> <button class="linklike">copy</button>`;
+    el.querySelector("button").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(secret).catch(() => {});
+      toast("Copied");
+    });
+    el.hidden = false;
+  }
+  $("#dk-create").addEventListener("click", async () => {
+    try {
+      const r = await api("/api-keys", { method: "POST", body: { name: $("#dk-name").value.trim() || "API key", scopes: ["read-availability", "create-booking", "manage-bookings"] } });
+      showSecret("#dk-secret", r.secret);
+      $("#dk-name").value = "";
+      renderDevKeys();
+    } catch (e) { toast(e.message); }
+  });
+  $("#ag-create").addEventListener("click", async () => {
+    const scopes = [];
+    if ($("#ag-s-read").checked) scopes.push("read-availability");
+    if ($("#ag-s-book").checked) scopes.push("create-booking");
+    if ($("#ag-s-manage").checked) scopes.push("manage-bookings");
+    try {
+      const name = $("#ag-name").value.trim() || "Agent";
+      const r = await api("/api-keys", { method: "POST", body: { kind: "agent", name, agent_name: name, scopes } });
+      showSecret("#ag-secret", r.secret);
+      $("#ag-name").value = "";
+      renderDevKeys();
+    } catch (e) { toast(e.message); }
+  });
+  async function renderAgentLog() {
+    const { actions } = await api("/agent-actions").catch(() => ({ actions: [] }));
+    const el = $("#ag-log");
+    if (!actions.length) { el.innerHTML = '<p class="mut small">No agent activity yet.</p>'; return; }
+    el.innerHTML = actions.slice(0, 30).map(a =>
+      `<p class="mut small" style="margin:.25rem 0">${new Date(a.created_at).toLocaleString()} · <strong>${esc(a.agent_name || a.key_name || "agent")}</strong> ${esc(a.action)}${a.detail?.eventType ? " · " + esc(a.detail.eventType) : ""}</p>`).join("");
+  }
+  async function renderWebhooks() {
+    const { webhooks } = await api("/webhooks");
+    const el = $("#wh-list");
+    el.innerHTML = "";
+    if (!webhooks.length) el.innerHTML = '<p class="mut small">None yet.</p>';
+    for (const w of webhooks) {
+      const row = document.createElement("div");
+      row.className = "wh-row";
+      row.innerHTML = `
+        <div class="dk-row"><span class="dk-key">${esc(w.url)}</span>
+          <span class="dk-meta">${w.events.map(esc).join(", ")}${w.active ? "" : " · paused"}</span>
+          <button class="linklike" data-a="test">test</button>
+          <button class="linklike" data-a="log">deliveries</button>
+          <button class="range-x" aria-label="Delete">×</button></div>
+        <p class="mut small">secret: <code>${esc(w.secret)}</code></p>
+        <div class="wh-log" hidden></div>`;
+      row.querySelector('[data-a=test]').addEventListener("click", async () => {
+        const r = await api(`/webhooks/${w.id}/test`, { method: "POST" }).catch(e => ({ ok: false, responseText: e.message }));
+        toast(r.ok ? `Delivered (${r.statusCode})` : `Failed: ${r.responseText || r.statusCode || "no response"}`);
+      });
+      row.querySelector('[data-a=log]').addEventListener("click", async () => {
+        const log = row.querySelector(".wh-log");
+        if (!log.hidden) { log.hidden = true; return; }
+        const { deliveries } = await api(`/webhooks/${w.id}/deliveries`);
+        log.innerHTML = deliveries.length ? deliveries.map(d =>
+          `<p class="mut small" style="margin:.2rem 0">${new Date(d.created_at).toLocaleString()} · ${esc(d.event)} · ${d.ok ? "✓" : "✗"} ${d.status_code ?? "—"} <button class="linklike" data-r="${d.id}">replay</button></p>`).join("")
+          : '<p class="mut small">No deliveries yet.</p>';
+        log.querySelectorAll("[data-r]").forEach(b => b.addEventListener("click", async () => {
+          const r = await api(`/webhooks/${w.id}/deliveries/${b.dataset.r}/replay`, { method: "POST" }).catch(e => ({ ok: false }));
+          toast(r.ok ? "Replayed ✓" : "Replay failed");
+        }));
+        log.hidden = false;
+      });
+      row.querySelector(".range-x").addEventListener("click", async () => {
+        if (!confirm("Delete this webhook?")) return;
+        await api("/webhooks/" + w.id, { method: "DELETE" }).catch(e => toast(e.message));
+        renderWebhooks();
+      });
+      el.appendChild(row);
+    }
+  }
+  $("#wh-create").addEventListener("click", async () => {
+    try {
+      await api("/webhooks", { method: "POST", body: { url: $("#wh-url").value.trim() } });
+      $("#wh-url").value = "";
+      renderWebhooks();
+    } catch (e) { toast(e.message); }
+  });
+
   $("#st-delete").addEventListener("click", async () => {
     const typed = prompt(`This permanently deletes your account, page, and all bookings.\n\nType your email (${me.email}) to confirm:`);
     if (typed === null) return;
@@ -841,6 +958,27 @@
       location.href = "https://bookii.to/";
     } catch (e) { toast(e.message); }
   });
+
+  /* ---------- insights ---------- */
+  const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  async function renderInsights() {
+    show("insights");
+    const d = await api("/insights");
+    const t = d.totals;
+    $("#in-tiles").innerHTML = `
+      <div class="in-tile"><p class="in-num">${t.booked || 0}</p><p class="in-lbl">bookings</p></div>
+      <div class="in-tile"><p class="in-num">${d.last7Days}</p><p class="in-lbl">last 7 days</p></div>
+      <div class="in-tile"><p class="in-num" style="color:var(--leaf)">${d.showRate === null ? "—" : d.showRate + "%"}</p><p class="in-lbl">show rate</p></div>
+      <div class="in-tile"><p class="in-num">${t.cancelled || 0}</p><p class="in-lbl">cancelled</p></div>
+      <div class="in-tile"><p class="in-num">${(d.byOrigin.find(o => o.origin === "agent") || {}).n || 0}</p><p class="in-lbl">via agents</p></div>`;
+    const bar = (label, n, max) => `<div class="in-bar-row"><span class="in-bar-lbl">${esc(label)}</span>
+      <div class="in-bar"><div class="in-bar-fill" style="width:${max ? Math.round(100 * n / max) : 0}%"></div></div>
+      <span class="in-bar-n">${n}</span></div>`;
+    const evMax = Math.max(1, ...d.byEvent.map(e => e.n));
+    $("#in-events").innerHTML = d.byEvent.length ? d.byEvent.map(e => bar(e.title, e.n, evMax)).join("") : '<p class="mut small">No bookings yet.</p>';
+    const dowMax = Math.max(1, ...d.byWeekday.map(e => e.n));
+    $("#in-days").innerHTML = d.byWeekday.length ? d.byWeekday.map(e => bar(DOWS[e.dow], e.n, dowMax)).join("") : '<p class="mut small">No bookings yet.</p>';
+  }
 
   /* ---------- calendars ---------- */
   async function renderCalendars() {

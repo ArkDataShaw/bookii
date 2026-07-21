@@ -21,6 +21,7 @@
     <a href="#/availability" data-nav="availability">Availability</a>
     <a href="#/meetings" data-nav="meetings">Meetings</a>
     <a href="#/calendars" data-nav="calendars">Calendars</a>
+    <a href="#/insights" data-nav="insights">Insights</a>
     <a href="#/settings" data-nav="settings">Settings</a>
   </nav>
   <div class="userchip" id="userchip" hidden>
@@ -215,6 +216,16 @@
     <div id="mt-list" class="host-bookings"></div>
   </section>
 
+  <!-- INSIGHTS -->
+  <section id="view-insights" class="view" hidden>
+    <div class="pagehead"><h1 class="serif">Insights</h1><p class="mut">Last 90 days</p></div>
+    <div class="in-tiles" id="in-tiles"></div>
+    <div class="editor-grid">
+      <div class="card"><h3 class="card-title">By event type</h3><div id="in-events"></div></div>
+      <div class="card"><h3 class="card-title">Busiest days</h3><div id="in-days"></div></div>
+    </div>
+  </section>
+
   <!-- SETTINGS -->
   <section id="view-settings" class="view view-narrow" hidden>
     <div class="pagehead"><h1 class="serif">Settings</h1></div>
@@ -240,6 +251,39 @@
     <div class="card">
       <h3 class="card-title">Plan &amp; billing</h3>
       <div id="st-billing"></div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">API keys</h3>
+      <p class="mut small">Bearer tokens for the <a href="https://bookii.to/openapi.json" target="_blank" rel="noopener">Bookii API</a>. Shown once at creation.</p>
+      <div id="dk-list" class="dk-list"></div>
+      <div class="dk-new">
+        <input type="text" id="dk-name" placeholder="Key name" maxlength="60">
+        <button class="btn btn-ghost btn-sm" id="dk-create">Create key</button>
+      </div>
+      <div class="dk-secret" id="dk-secret" hidden></div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Agent access <span class="opt">scoped tokens for AI assistants</span></h3>
+      <p class="mut small">Give an AI agent its own token with only the permissions you choose. Every action it takes is logged below.</p>
+      <div id="ag-list" class="dk-list"></div>
+      <div class="dk-new">
+        <input type="text" id="ag-name" placeholder="Agent name (e.g. Claude)" maxlength="60">
+        <label class="check-row small"><input type="checkbox" id="ag-s-read" checked> read availability</label>
+        <label class="check-row small"><input type="checkbox" id="ag-s-book" checked> create bookings</label>
+        <label class="check-row small"><input type="checkbox" id="ag-s-manage"> manage bookings</label>
+        <button class="btn btn-ghost btn-sm" id="ag-create">Create agent token</button>
+      </div>
+      <div class="dk-secret" id="ag-secret" hidden></div>
+      <details class="ts-details"><summary>Agent activity log</summary><div id="ag-log"></div></details>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Webhooks</h3>
+      <p class="mut small">HTTPS endpoints that receive booking events, signed with <span style="font-family:var(--font-m)">X-Bookii-Signature</span>.</p>
+      <div id="wh-list"></div>
+      <div class="dk-new">
+        <input type="url" id="wh-url" placeholder="https://your-server.com/hooks/bookii">
+        <button class="btn btn-ghost btn-sm" id="wh-create">Add webhook</button>
+      </div>
     </div>
     <div class="card">
       <h3 class="card-title">Danger zone</h3>
