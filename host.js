@@ -218,7 +218,7 @@
   $("#dash-new").addEventListener("click", () => { location.hash = "#/event/new"; });
 
   /* ---------- event editor ---------- */
-  const COLORS = ["#2C41E8", "#20794D", "#EE8F45", "#B3261E", "#7B4FD8", "#0E7490", "#1B1E28"];
+  const COLORS = ["#2B3EE5", "#20794D", "#EE8F45", "#B3261E", "#7B4FD8", "#0E7490", "#1B1E28"];
   const QTYPES = [["text", "Short answer"], ["textarea", "Long answer"], ["phone", "Phone number"], ["select", "Dropdown"]];
   let ed = null, edDirty = false, pvTimer = null;
 

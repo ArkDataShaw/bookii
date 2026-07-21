@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS event_types (
   slug              text NOT NULL,
   description       text NOT NULL DEFAULT '',
   duration_min      int NOT NULL DEFAULT 30 CHECK (duration_min BETWEEN 5 AND 720),
-  color             text NOT NULL DEFAULT '#2C41E8',
+  color             text NOT NULL DEFAULT '#2B3EE5',
   locations         jsonb NOT NULL DEFAULT '["Google Meet"]',
   buffer_before_min int NOT NULL DEFAULT 0,
   buffer_after_min  int NOT NULL DEFAULT 0,
@@ -126,3 +126,4 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   response   jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE event_types ALTER COLUMN color SET DEFAULT '#2B3EE5';
