@@ -763,7 +763,9 @@ app.post("/v1/public-bookings", async (c) => {
       [et.id, et.user_id, new Date(startMs).toISOString(), new Date(endMs).toISOString(),
         String(name).slice(0, 100), String(email).slice(0, 200), JSON.stringify(answers || {}),
         String(location || (Array.isArray(et.locations) ? et.locations[0] : "") || "").slice(0, 100),
-        agent ? "agent" : "human", agent ? String(agent).slice(0, 60) : null, principal ? String(principal).slice(0, 200) : null]);
+        (agent || k?.key?.kind === "agent") ? "agent" : "human",
+        agent ? String(agent).slice(0, 60) : (k?.key?.kind === "agent" ? (k.key.agent_name || k.key.name) : null),
+        principal ? String(principal).slice(0, 200) : null]);
     await client.query("COMMIT");
     booking = r.rows[0];
   } catch (e) {
