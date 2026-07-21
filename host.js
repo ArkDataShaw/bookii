@@ -46,10 +46,10 @@
   };
 
   /* ---------- router ---------- */
-  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "profile", "public", "cancel"];
+  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "settings", "profile", "public", "cancel"];
   function show(view) {
     for (const v of VIEWS) $("#view-" + v).hidden = v !== view;
-    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars"];
+    const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "settings"];
     $("#app-nav").hidden = !appViews.includes(view);
     $("#userchip").hidden = !me || !(appViews.includes(view) || view === "onboarding");
     if (me && view === "onboarding") $("#userchip-name").textContent = me.name || me.email;
@@ -65,6 +65,7 @@
       const p = location.pathname.split("/").filter(Boolean);
       const h = location.hash.replace(/^#\//, "").split("/").filter(Boolean);
       if (h[0] === "cancel" && h[1] && h[2]) return renderCancel(h[1], h[2]);
+      if (h[0] === "reschedule" && h[1] && h[2]) return renderReschedule(h[1], h[2]);
       if (p[0] && p[0] !== "app.html") {
         if (p[1]) return renderPublic(p[0], p[1]);
         return renderProfile(p[0]);
@@ -79,6 +80,7 @@
       return renderProfile(parts[1]);
     }
     if (parts[0] === "cancel" && parts[1] && parts[2]) return renderCancel(parts[1], parts[2]);
+    if (parts[0] === "reschedule" && parts[1] && parts[2]) return renderReschedule(parts[1], parts[2]);
     // authed routes
     if (!me) {
       const token = localStorage.getItem("bookii-token");
@@ -90,6 +92,7 @@
       case "availability": return renderAvailability();
       case "meetings": return renderMeetings();
       case "calendars": return renderCalendars();
+      case "settings": return renderSettings();
       case "event": return renderEditor(parts[1]);
       default: return renderDashboard();
     }
@@ -560,13 +563,33 @@
   });
 
   /* ---------- meetings ---------- */
+  let mtFilter = "upcoming";
+  const MT_TABS = [
+    ["upcoming", "Upcoming", b => new Date(b.start_at) >= new Date() && ["pending", "confirmed"].includes(b.status)],
+    ["pending", "Pending", b => b.status === "pending"],
+    ["past", "Past", b => new Date(b.start_at) < new Date() && b.status !== "cancelled"],
+    ["cancelled", "Cancelled", b => b.status === "cancelled"],
+  ];
   async function renderMeetings() {
     show("meetings");
     const { bookings } = await api("/bookings");
+    const tabs = $("#mt-tabs");
+    tabs.innerHTML = "";
+    for (const [id, label, pred] of MT_TABS) {
+      const n = bookings.filter(pred).length;
+      const btn = document.createElement("button");
+      btn.className = "sched-tab" + (mtFilter === id ? " on" : "");
+      btn.textContent = n ? `${label} · ${n}` : label;
+      btn.addEventListener("click", () => { mtFilter = id; renderMeetings(); });
+      tabs.appendChild(btn);
+    }
+    const pred = MT_TABS.find(t => t[0] === mtFilter)[2];
+    let shown = bookings.filter(pred);
+    if (mtFilter === "upcoming") shown = shown.slice().reverse(); // soonest first
     const list = $("#mt-list");
     list.innerHTML = "";
-    if (!bookings.length) list.innerHTML = '<p class="et-empty">No upcoming meetings. Share a link and they\u2019ll land here.</p>';
-    for (const b of bookings) {
+    if (!shown.length) list.innerHTML = `<p class="et-empty">${mtFilter === "upcoming" ? "No upcoming meetings. Share a link and they\u2019ll land here." : "Nothing here."}</p>`;
+    for (const b of shown) {
       const el = document.createElement("div");
       el.className = "bk-card" + (b.origin === "agent" ? " bk-agent" : "");
       const when = new Intl.DateTimeFormat("en-US", { timeZone: me.timezone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(b.start_at));
@@ -587,6 +610,79 @@
       list.appendChild(el);
     }
   }
+
+  /* ---------- settings ---------- */
+  let stTimer = null, stOrigUsername = null;
+  async function renderSettings() {
+    show("settings");
+    const { user } = await api("/me");
+    me = user;
+    stOrigUsername = user.username;
+    $("#st-name").value = user.name || "";
+    $("#st-username").value = user.username || "";
+    $("#st-welcome").value = user.welcome_note || "";
+    tzOptions($("#st-tz"), user.timezone);
+    $("#st-un-status").textContent = "";
+    $("#st-un-warn").hidden = true;
+    $("#st-error").hidden = true;
+    const np = user.notify_prefs || {};
+    $("#st-n-booked").checked = np.booked !== false;
+    $("#st-n-cancelled").checked = np.cancelled !== false;
+    $("#st-n-digest").checked = np.digest === true;
+  }
+  $("#st-username").addEventListener("input", () => {
+    const un = $("#st-username").value.trim().toLowerCase();
+    $("#st-un-warn").hidden = un === stOrigUsername;
+    clearTimeout(stTimer);
+    if (un === stOrigUsername) { $("#st-un-status").textContent = ""; return; }
+    stTimer = setTimeout(async () => {
+      if (un.length < 3) { $("#st-un-status").textContent = ""; return; }
+      try {
+        const r = await api("/username-check/" + encodeURIComponent(un));
+        $("#st-un-status").textContent = r.available ? "✓ available" : "taken";
+        $("#st-un-status").className = "slug-status " + (r.available ? "ok" : "bad");
+      } catch {}
+    }, 350);
+  });
+  for (const id of ["st-n-booked", "st-n-cancelled", "st-n-digest"]) {
+    $("#" + id).addEventListener("change", async () => {
+      await api("/me", { method: "PATCH", body: { notify_prefs: {
+        booked: $("#st-n-booked").checked,
+        cancelled: $("#st-n-cancelled").checked,
+        digest: $("#st-n-digest").checked,
+      } } }).catch(e => toast(e.message));
+      toast("Preferences saved");
+    });
+  }
+  $("#st-save").addEventListener("click", async () => {
+    $("#st-error").hidden = true;
+    try {
+      const r = await api("/me", { method: "PATCH", body: {
+        name: $("#st-name").value.trim(),
+        username: $("#st-username").value.trim().toLowerCase(),
+        welcome_note: $("#st-welcome").value.trim(),
+        timezone: $("#st-tz").value,
+      } });
+      me = r.user;
+      stOrigUsername = me.username;
+      $("#st-un-warn").hidden = true;
+      toast("Saved");
+    } catch (e) {
+      $("#st-error").textContent = e.message;
+      $("#st-error").hidden = false;
+    }
+  });
+  $("#st-delete").addEventListener("click", async () => {
+    const typed = prompt(`This permanently deletes your account, page, and all bookings.\n\nType your email (${me.email}) to confirm:`);
+    if (typed === null) return;
+    try {
+      await api("/me", { method: "DELETE", body: { confirmEmail: typed.trim() } });
+      localStorage.removeItem("bookii-token");
+      me = null;
+      alert("Your account has been deleted.");
+      location.href = "https://bookii.to/";
+    } catch (e) { toast(e.message); }
+  });
 
   /* ---------- calendars ---------- */
   async function renderCalendars() {
@@ -675,17 +771,61 @@
   }
 
   /* ---------- public booking ---------- */
-  let pb = { data: null, monthCursor: null, selectedDay: null, viewerTz: detectedTz, slot: null, username: null, slug: null, booking: null };
+  let pb = { data: null, monthCursor: null, selectedDay: null, viewerTz: detectedTz, slot: null, username: null, slug: null, booking: null, resched: null };
+
+  /* ---------- reschedule mode ---------- */
+  async function renderReschedule(id, token) {
+    let info;
+    try {
+      info = (await api(`/public-bookings/${id}?token=${encodeURIComponent(token)}`)).booking;
+    } catch {
+      return renderPublicError("This reschedule link isn't valid anymore.", null);
+    }
+    if (info.status === "cancelled") {
+      return renderPublicError("This booking was cancelled — you can book a fresh time instead.", info.username && `#/u/${info.username}/${info.slug}`);
+    }
+    pb.resched = { id, token, former: info.start_at, name: info.invitee_name, email: info.invitee_email };
+    await renderPublic(info.username, info.slug);
+    // banner with the former time
+    const banner = document.createElement("div");
+    banner.className = "resched-banner";
+    banner.innerHTML = `Rescheduling <strong>${esc(info.title)}</strong> — currently
+      <s>${fmtDay(info.start_at, pb.viewerTz)} · ${fmtTime(info.start_at, pb.viewerTz)}</s>.
+      Pick a new time below.`;
+    $("#pub-page").prepend(banner);
+  }
+
+  let pubPageTemplate = null;
+  function ensurePubPage() {
+    const el = $("#pub-page");
+    if (pubPageTemplate === null) pubPageTemplate = el.innerHTML;
+    else if (el.querySelector(".pub-error")) { el.innerHTML = pubPageTemplate; bindPublicControls(); }
+    document.querySelectorAll(".resched-banner").forEach(x => x.remove());
+  }
+  function renderPublicError(msg, backHref) {
+    show("public");
+    ensurePubPage();
+    $("#pub-page").innerHTML = `<div class="pub-error">
+      <h2 class="serif">Hmm.</h2>
+      <p class="mut">${esc(msg)}</p>
+      ${backHref ? `<a class="btn btn-primary" href="${backHref}">Open the booking page</a>` : ""}
+    </div>`;
+  }
 
   async function renderPublic(username, slug) {
     show("public");
     pb.username = username; pb.slug = slug;
+    if (!location.hash.includes("reschedule")) pb.resched = null;
     $("#pb-confirmed").hidden = true;
+    document.querySelectorAll(".resched-banner").forEach(el => el.remove());
     try {
       await loadPublicMonth(new Date());
     } catch (e) {
-      $("#pub-page").innerHTML = `<p class="et-empty">${esc(e.message || "Page not found.")}</p>`;
-      return;
+      let profileLink = null;
+      try { await api("/pages/" + encodeURIComponent(username)); profileLink = `#/u/${username}`; } catch {}
+      return renderPublicError(
+        e.status === 404 ? "That booking page doesn't exist — the link may have changed." : (e.message || "Something went wrong."),
+        profileLink);
     }
     const d = pb.data;
     $("#pb-avatar").textContent = (d.host.name || d.host.username).slice(0, 2).toUpperCase();
@@ -735,10 +875,41 @@
     }
     renderPubSlots();
   }
+  async function findNextAvailable() {
+    // look 45-90 days out for the first open day
+    const from = new Date(Date.now() + 45 * 86400000);
+    try {
+      const d = await api(`/pages/${encodeURIComponent(pb.username)}/${encodeURIComponent(pb.slug)}?from=${from.toISOString().slice(0, 10)}&days=45`);
+      const first = Object.entries(d.days).find(([, s]) => s.length);
+      return first ? first[0] : null;
+    } catch { return null; }
+  }
   function renderPubSlots() {
     const list = $("#pb-slots");
     list.innerHTML = "";
-    if (!pb.selectedDay) { $("#pb-date").textContent = "No open times this month"; return; }
+    if (!pb.selectedDay) {
+      $("#pb-date").textContent = "No open times right now";
+      list.innerHTML = '<p class="mut">Looking further ahead…</p>';
+      findNextAvailable().then(nextKey => {
+        if (!$("#pb-slots")) return;
+        if (nextKey) {
+          const [y, m, d] = nextKey.split("-").map(Number);
+          const label = new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+          list.innerHTML = "";
+          const btn = document.createElement("button");
+          btn.className = "btn btn-ghost";
+          btn.textContent = `Next availability: ${label} →`;
+          btn.addEventListener("click", async () => {
+            await loadPublicMonth(new Date(y, m - 1, d));
+            renderPubCal();
+          });
+          list.appendChild(btn);
+        } else {
+          list.innerHTML = '<p class="mut">Nothing bookable in the next three months. The host may have paused bookings.</p>';
+        }
+      });
+      return;
+    }
     const slots = pb.data.days[pb.selectedDay] || [];
     if (slots.length) $("#pb-date").textContent = fmtDay(slots[0].start, pb.viewerTz);
     for (const s of slots) {
@@ -749,15 +920,18 @@
       list.appendChild(el);
     }
   }
-  $("#pb-prev").addEventListener("click", () => { pb.monthCursor = new Date(pb.monthCursor.getFullYear(), pb.monthCursor.getMonth() - 1, 1); renderPubCal(); });
-  $("#pb-next").addEventListener("click", async () => {
-    const next = new Date(pb.monthCursor.getFullYear(), pb.monthCursor.getMonth() + 1, 1);
-    if (!Object.keys(pb.data.days).some(k => k.startsWith(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`))) {
-      try { await loadPublicMonth(next); } catch {}
-    } else pb.monthCursor = next;
-    renderPubCal();
-  });
-  $("#pb-tz").addEventListener("change", e => { pb.viewerTz = e.target.value; renderPubSlots(); });
+  function bindPublicControls() {
+    $("#pb-prev").addEventListener("click", () => { pb.monthCursor = new Date(pb.monthCursor.getFullYear(), pb.monthCursor.getMonth() - 1, 1); renderPubCal(); });
+    $("#pb-next").addEventListener("click", async () => {
+      const next = new Date(pb.monthCursor.getFullYear(), pb.monthCursor.getMonth() + 1, 1);
+      if (!Object.keys(pb.data.days).some(k => k.startsWith(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`))) {
+        try { await loadPublicMonth(next); } catch {}
+      } else pb.monthCursor = next;
+      renderPubCal();
+    });
+    $("#pb-tz").addEventListener("change", e => { pb.viewerTz = e.target.value; renderPubSlots(); });
+  }
+  bindPublicControls();
 
   function dualTz(iso) {
     const v = fmtTime(iso, pb.viewerTz);
@@ -769,10 +943,24 @@
     pb.slot = s;
     $("#pb-sheettime").textContent = new Intl.DateTimeFormat("en-US", { timeZone: pb.viewerTz, weekday: "short", month: "short", day: "numeric" }).format(new Date(s.start)) + " · " + fmtTime(s.start, pb.viewerTz);
     $("#pb-tzline").textContent = dualTz(s.start);
+    // reschedule mode: prefill + lock identity, ask only for a reason
+    const isResched = !!pb.resched;
+    $("#pb-name").value = isResched ? pb.resched.name : $("#pb-name").value;
+    $("#pb-email").value = isResched ? pb.resched.email : $("#pb-email").value;
+    $("#pb-name").readOnly = isResched;
+    $("#pb-email").readOnly = isResched;
+    $("#pb-confirm").textContent = isResched ? "Confirm new time" : "Confirm booking";
     // questions
     const qwrap = $("#pb-questions");
     qwrap.innerHTML = "";
-    for (const qq of pb.data.eventType.questions || []) {
+    if (isResched) {
+      const lab = document.createElement("label");
+      lab.innerHTML = 'Reason for rescheduling <span class="opt">optional</span>';
+      const input = document.createElement("textarea");
+      input.rows = 2; input.id = "pb-resched-reason";
+      lab.appendChild(input);
+      qwrap.appendChild(lab);
+    } else for (const qq of pb.data.eventType.questions || []) {
       if (!qq.label) continue;
       const lab = document.createElement("label");
       lab.innerHTML = `${esc(qq.label)}${qq.required ? "" : ' <span class="opt">optional</span>'}`;
@@ -810,6 +998,24 @@
     e.preventDefault();
     $("#pb-error").hidden = true;
     $("#pb-confirm").disabled = true;
+    if (pb.resched) {
+      try {
+        const r = await api(`/public-bookings/${pb.resched.id}/reschedule`, { method: "POST", body: {
+          cancelToken: pb.resched.token,
+          start: pb.slot.start,
+          reason: ($("#pb-resched-reason") || {}).value || "",
+        }});
+        pb.booking = { bookingId: pb.resched.id, cancelToken: pb.resched.token, start: r.start, end: r.end, eventTitle: pb.data.eventType.title };
+        closePubSheet();
+        showConfirmed(pb.booking, "Rescheduled.");
+      } catch (err) {
+        $("#pb-error").textContent = err.message;
+        $("#pb-error").hidden = false;
+        if (err.status === 409) { try { await loadPublicMonth(pb.monthCursor); renderPubCal(); } catch {} }
+      }
+      $("#pb-confirm").disabled = false;
+      return;
+    }
     try {
       const hold = await api("/holds", { method: "POST", body: { eventTypeId: pb.data.eventType.id, start: pb.slot.start } });
       const answers = {};
@@ -827,10 +1033,7 @@
       });
       pb.booking = booking;
       closePubSheet();
-      $("#pb-when").textContent = fmtDay(booking.start, pb.viewerTz) + " · " + fmtTime(booking.start, pb.viewerTz) + "–" + fmtTime(booking.end, pb.viewerTz);
-      $("#pb-whentz").textContent = dualTz(booking.start);
-      $("#pb-cancel-link").href = `#/cancel/${booking.bookingId}/${booking.cancelToken}`;
-      $("#pb-confirmed").hidden = false;
+      showConfirmed(booking, "It's done.");
     } catch (err) {
       $("#pb-error").textContent = err.message;
       $("#pb-error").hidden = false;
@@ -839,6 +1042,35 @@
       }
     }
     $("#pb-confirm").disabled = false;
+  });
+  function calDeepLinks(b) {
+    const fmt = iso => new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const title = encodeURIComponent(`${b.eventTitle} — ${pb.data.host.name || pb.data.host.username}`);
+    const s = fmt(b.start), e = fmt(b.end);
+    return {
+      google: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${s}/${e}`,
+      outlook: `https://outlook.live.com/calendar/0/deeplink/compose?subject=${title}&startdt=${encodeURIComponent(b.start)}&enddt=${encodeURIComponent(b.end)}`,
+      yahoo: `https://calendar.yahoo.com/?v=60&title=${title}&st=${s}&et=${e}`,
+    };
+  }
+  function showConfirmed(booking, heading) {
+    $("#pb-confirmed .serif").textContent = heading;
+    $("#pb-when").textContent = fmtDay(booking.start, pb.viewerTz) + " · " + fmtTime(booking.start, pb.viewerTz) + "–" + fmtTime(booking.end, pb.viewerTz);
+    $("#pb-whentz").textContent = dualTz(booking.start);
+    $("#pb-cancel-link").href = `#/cancel/${booking.bookingId}/${booking.cancelToken}`;
+    $("#pb-resched-link").href = `#/reschedule/${booking.bookingId}/${booking.cancelToken}`;
+    const links = calDeepLinks(booking);
+    $("#pb-addcal").innerHTML =
+      `<a href="${links.google}" target="_blank" rel="noopener">Google</a> ·
+       <a href="${links.outlook}" target="_blank" rel="noopener">Outlook</a> ·
+       <a href="${links.yahoo}" target="_blank" rel="noopener">Yahoo</a>`;
+    $("#pb-book-another").href = `#/u/${pb.username}/${pb.slug}`;
+    $("#pb-confirmed").hidden = false;
+  }
+  $("#pb-book-another").addEventListener("click", () => {
+    $("#pb-confirmed").hidden = true;
+    pb.resched = null;
+    renderPublic(pb.username, pb.slug);
   });
   $("#pb-ics").addEventListener("click", () => {
     if (!pb.booking) return;
@@ -854,16 +1086,29 @@
   });
 
   /* ---------- cancel ---------- */
-  function renderCancel(id, token) {
+  async function renderCancel(id, token) {
     show("cancel");
     $("#cx-msg").textContent = "Are you sure you want to cancel this booking?";
+    $("#cx-reason-wrap").hidden = false;
+    $("#cx-rebook").hidden = true;
     const btn = $("#cx-btn");
     btn.hidden = false;
+    let rebookHref = null;
+    try {
+      const { booking } = await api(`/public-bookings/${id}?token=${encodeURIComponent(token)}`);
+      $("#cx-msg").textContent = `Cancel ${booking.title} on ${fmtDay(booking.start_at, detectedTz)} at ${fmtTime(booking.start_at, detectedTz)}?`;
+      if (booking.username) rebookHref = `#/u/${booking.username}/${booking.slug}`;
+    } catch {}
     btn.onclick = async () => {
       try {
-        await api(`/public-bookings/${id}/cancel`, { method: "POST", body: { cancelToken: token } });
+        await api(`/public-bookings/${id}/cancel`, { method: "POST", body: { cancelToken: token, reason: $("#cx-reason").value.trim() } });
         $("#cx-msg").textContent = "Cancelled. The time is open again.";
         btn.hidden = true;
+        $("#cx-reason-wrap").hidden = true;
+        if (rebookHref) {
+          $("#cx-rebook").innerHTML = `Changed your mind? <a href="${rebookHref}">Book a new time</a>.`;
+          $("#cx-rebook").hidden = false;
+        }
       } catch (e) { $("#cx-msg").textContent = e.message; }
     };
   }

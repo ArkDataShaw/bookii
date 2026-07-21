@@ -21,6 +21,7 @@
     <a href="#/availability" data-nav="availability">Availability</a>
     <a href="#/meetings" data-nav="meetings">Meetings</a>
     <a href="#/calendars" data-nav="calendars">Calendars</a>
+    <a href="#/settings" data-nav="settings">Settings</a>
   </nav>
   <div class="userchip" id="userchip" hidden>
     <span id="userchip-name"></span>
@@ -175,7 +176,37 @@
   <!-- MEETINGS -->
   <section id="view-meetings" class="view" hidden>
     <div class="pagehead"><h1 class="serif">Meetings</h1></div>
+    <div class="sched-tabs" id="mt-tabs"></div>
     <div id="mt-list" class="host-bookings"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="view-settings" class="view view-narrow" hidden>
+    <div class="pagehead"><h1 class="serif">Settings</h1></div>
+    <div class="card">
+      <h3 class="card-title">Profile</h3>
+      <label>Name<input type="text" id="st-name" maxlength="80"></label>
+      <label>Your link
+        <span class="slug-claim">from.bookii.to/<input type="text" id="st-username" spellcheck="false" autocomplete="off">
+        <span class="slug-status" id="st-un-status"></span></span>
+        <span class="mut small" id="st-un-warn" hidden>⚠ Changing this breaks every link you've already shared.</span></label>
+      <label>Welcome line<input type="text" id="st-welcome" maxlength="300"></label>
+      <label>Timezone<select id="st-tz"></select></label>
+      <p class="form-error" id="st-error" hidden></p>
+      <button class="btn btn-primary" id="st-save">Save changes</button>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Email notifications</h3>
+      <label class="check-row"><input type="checkbox" id="st-n-booked"> When someone books me</label>
+      <label class="check-row"><input type="checkbox" id="st-n-cancelled"> When a booking is cancelled or rescheduled</label>
+      <label class="check-row"><input type="checkbox" id="st-n-digest"> Daily agenda email</label>
+      <p class="mut small">Delivery begins when email sending launches — your preferences are saved now.</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Danger zone</h3>
+      <p class="mut small">Deleting your account removes your page, event types, schedules, connected calendars, and booking history. This can't be undone.</p>
+      <button class="linklike danger" id="st-delete">Delete my account</button>
+    </div>
   </section>
 
   <!-- CALENDARS -->
@@ -244,8 +275,13 @@
         <p class="confirmed-when" id="pb-when"></p>
         <p class="confirmed-tz" id="pb-whentz"></p>
         <div class="confirmed-actions">
-          <button class="btn btn-ghost" id="pb-ics">Add to calendar (.ics)</button>
-          <a class="linklike" id="pb-cancel-link">Cancel this booking</a>
+          <button class="btn btn-ghost" id="pb-ics">Download .ics</button>
+          <span class="addcal-links">Add to <span id="pb-addcal"></span></span>
+        </div>
+        <div class="confirmed-actions confirmed-secondary">
+          <a class="linklike" id="pb-book-another">Book another time</a>
+          <a class="linklike" id="pb-resched-link">Reschedule</a>
+          <a class="linklike" id="pb-cancel-link">Cancel</a>
         </div>
       </div>
     </div>
@@ -256,13 +292,19 @@
     <div class="card" style="text-align:center">
       <h1 class="serif">Cancel booking</h1>
       <p class="mut" id="cx-msg">Are you sure you want to cancel?</p>
+      <label class="cx-reason" id="cx-reason-wrap">Reason <span class="opt">optional — shared with the host</span>
+        <textarea id="cx-reason" rows="2"></textarea></label>
       <button class="btn btn-primary" id="cx-btn">Yes, cancel it</button>
+      <p class="mut" id="cx-rebook" hidden></p>
     </div>
   </section>
 
   <div class="toast" id="toast" hidden></div>
 </main>
 
+<footer class="foot">
+  <p><span class="serif">bookii</span> · <a href="/privacy.html">privacy</a> · <a href="/terms.html">terms</a> · <a href="mailto:support@bookii.to">support</a></p>
+</footer>
 <script src="/host.js"></script>
 </body>
 </html>

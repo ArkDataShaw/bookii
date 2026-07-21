@@ -127,3 +127,4 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE event_types ALTER COLUMN color SET DEFAULT '#2B3EE5';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_prefs jsonb NOT NULL DEFAULT '{"booked":true,"cancelled":true,"digest":false}';

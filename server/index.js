@@ -93,8 +93,23 @@ app.patch("/v1/me", async (c) => {
   if (b.name !== undefined) await q(`UPDATE users SET name=$1 WHERE id=$2`, [String(b.name).slice(0, 80), u.id]);
   if (b.welcome_note !== undefined) await q(`UPDATE users SET welcome_note=$1 WHERE id=$2`, [String(b.welcome_note).slice(0, 300), u.id]);
   if (b.timezone !== undefined && isValidTz(b.timezone)) await q(`UPDATE users SET timezone=$1 WHERE id=$2`, [b.timezone, u.id]);
-  const r = await q(`SELECT id, email, name, username, timezone, welcome_note FROM users WHERE id=$1`, [u.id]);
+  if (b.notify_prefs !== undefined && typeof b.notify_prefs === "object") {
+    await q(`UPDATE users SET notify_prefs = notify_prefs || $1 WHERE id=$2`, [JSON.stringify(b.notify_prefs), u.id]);
+  }
+  const r = await q(`SELECT id, email, name, username, timezone, welcome_note, notify_prefs FROM users WHERE id=$1`, [u.id]);
   return c.json({ user: r.rows[0] });
+});
+
+app.delete("/v1/me", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const { confirmEmail } = await c.req.json().catch(() => ({}));
+  if ((confirmEmail || "").toLowerCase() !== u.email) return err(c, 400, "Type your account email to confirm deletion.");
+  // revoke calendar tokens best-effort before cascade delete
+  const conns = (await q(`SELECT * FROM calendar_connections WHERE user_id=$1 AND provider='google'`, [u.id])).rows;
+  for (const conn of conns) await G.revoke(conn);
+  await q(`DELETE FROM users WHERE id=$1`, [u.id]); // cascades to everything
+  return c.json({ ok: true });
 });
 
 app.get("/v1/username-check/:name", async (c) => {
@@ -277,8 +292,8 @@ app.get("/v1/bookings", async (c) => {
   const r = await q(
     `SELECT b.*, et.title AS event_title, et.slug AS event_slug FROM bookings b
      JOIN event_types et ON et.id=b.event_type_id
-     WHERE b.user_id=$1 AND b.start_at > now() - interval '1 day'
-     ORDER BY b.start_at LIMIT 100`, [u.id]);
+     WHERE b.user_id=$1 AND b.start_at > now() - interval '90 days'
+     ORDER BY b.start_at DESC LIMIT 200`, [u.id]);
   return c.json({ bookings: r.rows });
 });
 
@@ -516,10 +531,74 @@ async function removeExternalEvent(bookingId) {
   } catch (e) { console.error("calendar event delete:", e.message); }
 }
 
-app.post("/v1/public-bookings/:id/cancel", async (c) => {
-  const { cancelToken } = await c.req.json().catch(() => ({}));
-  const r = await q(`UPDATE bookings SET status='cancelled' WHERE id=$1 AND cancel_token=$2 AND status IN ('pending','confirmed') RETURNING id`,
+// Invitee reads their booking via cancel token (for reschedule page context)
+app.get("/v1/public-bookings/:id", async (c) => {
+  const token = c.req.query("token") || "";
+  const r = await q(
+    `SELECT b.id, b.start_at, b.end_at, b.status, b.invitee_name, b.invitee_email,
+            et.title, et.slug, et.duration_min, u.username, u.name AS host_name
+     FROM bookings b JOIN event_types et ON et.id=b.event_type_id JOIN users u ON u.id=b.user_id
+     WHERE b.id=$1 AND b.cancel_token=$2`, [c.req.param("id"), token]);
+  if (!r.rows.length) return err(c, 404, "Booking not found.");
+  return c.json({ booking: r.rows[0] });
+});
+
+app.post("/v1/public-bookings/:id/reschedule", async (c) => {
+  const { cancelToken, start, reason } = await c.req.json().catch(() => ({}));
+  const startMs = Date.parse(start || "");
+  if (!startMs) return err(c, 400, "start (ISO) required.");
+  const br = await q(
+    `SELECT b.*, et.duration_min, et.schedule_id FROM bookings b JOIN event_types et ON et.id=b.event_type_id
+     WHERE b.id=$1 AND b.cancel_token=$2 AND b.status IN ('pending','confirmed')`,
     [c.req.param("id"), cancelToken || ""]);
+  const b = br.rows[0];
+  if (!b) return err(c, 404, "Booking not found (or already cancelled).");
+  const et = (await q(`SELECT * FROM event_types WHERE id=$1`, [b.event_type_id])).rows[0];
+  const sched = (await q(`SELECT * FROM schedules WHERE id=$1`, [et.schedule_id])).rows[0];
+  if (!sched) return err(c, 409, "This event can't be rescheduled right now.");
+  const endMs = startMs + et.duration_min * 60000;
+  if (!(await slotIsAvailable(et, sched, startMs)) && startMs !== b.start_at.getTime()) {
+    return err(c, 409, "That time is no longer available.");
+  }
+  try {
+    await q(
+      `UPDATE bookings SET start_at=$1, end_at=$2,
+         answers = answers || $3 WHERE id=$4`,
+      [new Date(startMs).toISOString(), new Date(endMs).toISOString(),
+        JSON.stringify(reason ? { _reschedule_reason: String(reason).slice(0, 300) } : {}), b.id]);
+  } catch (e) {
+    if (e.code === "23P01") return err(c, 409, "That time was just taken.");
+    throw e;
+  }
+  // move the external calendar event: delete old, create new (best effort)
+  try {
+    const ref = b.external_refs?.google;
+    if (ref) {
+      const conn = (await q(`SELECT * FROM calendar_connections WHERE id=$1`, [ref.connectionId])).rows[0];
+      if (conn) {
+        await G.deleteEvent(conn, ref.eventId).catch(() => {});
+        const host = (await q(`SELECT username FROM users WHERE id=$1`, [et.user_id])).rows[0];
+        const evId = await G.createEvent(conn, {
+          start_at: new Date(startMs), end_at: new Date(endMs),
+          invitee_name: b.invitee_name, invitee_email: b.invitee_email,
+          note: reason ? `Rescheduled: ${reason}` : "Rescheduled",
+        }, et, host);
+        await q(`UPDATE bookings SET external_refs = external_refs || $1 WHERE id=$2`,
+          [JSON.stringify({ google: { connectionId: conn.id, eventId: evId } }), b.id]);
+      }
+    }
+  } catch (e) { console.error("reschedule calendar sync:", e.message); }
+  return c.json({ ok: true, start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() });
+});
+
+app.post("/v1/public-bookings/:id/cancel", async (c) => {
+  const { cancelToken, reason } = await c.req.json().catch(() => ({}));
+  const r = await q(
+    `UPDATE bookings SET status='cancelled',
+       answers = answers || $3
+     WHERE id=$1 AND cancel_token=$2 AND status IN ('pending','confirmed') RETURNING id`,
+    [c.req.param("id"), cancelToken || "",
+      JSON.stringify(reason ? { _cancel_reason: String(reason).slice(0, 300) } : {})]);
   if (!r.rows.length) return err(c, 404, "Booking not found (or already cancelled).");
   await removeExternalEvent(c.req.param("id"));
   return c.json({ ok: true });

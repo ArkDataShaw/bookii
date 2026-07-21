@@ -168,3 +168,18 @@
 /* calendar connection rows */
 .conn-row{display:flex;flex-direction:column;gap:.35rem;border-top:1px solid var(--rule);padding:.7rem 0;margin-top:.7rem}
 .conn-row .prov-state{margin-top:0;align-self:flex-start}
+
+/* reschedule + edge states + confirmation extras */
+.resched-banner{
+  grid-column:1/-1;background:var(--blue-soft);border:1px solid var(--blue);
+  border-radius:10px;padding:.7rem 1rem;font-size:.9rem;color:var(--blue-deep);margin-bottom:.4rem;
+}
+.resched-banner s{opacity:.75}
+.pub-error{text-align:center;padding:3rem 1rem;grid-column:1/-1}
+.pub-error h2{font-size:2rem;margin:0 0 .5rem}
+.pub-error .btn{margin-top:1rem}
+.addcal-links{font-size:.85rem;color:var(--ink-60)}
+.addcal-links a{font-weight:600}
+.confirmed-secondary{margin-top:-.4rem}
+.cx-reason{display:flex;flex-direction:column;gap:.35rem;font-size:.8rem;font-weight:600;color:var(--ink-60);text-align:left;margin:1rem 0}
+.cx-reason textarea{font-family:var(--font-b);font-size:.95rem;padding:.6rem .7rem;border-radius:9px;border:1.5px solid var(--rule);background:#fff}
