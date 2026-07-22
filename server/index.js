@@ -7,7 +7,7 @@ import { computeSlots, slotIsAvailable, explainDay, computeTeamSlots, hostsFreeA
 import { isValidTz } from "./time.js";
 import * as G from "./google.js";
 import { encrypt, signState, verifyState } from "./crypto.js";
-import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails, sendMagicLink, sendPasswordReset, sendReminder, emailReady } from "./email.js";
+import { sendBookingEmails, sendCancellationEmails, sendRescheduleEmails, sendMagicLink, sendPasswordReset, sendReminder, sendTeamInvite, emailReady } from "./email.js";
 import { fireWebhooks, deliver } from "./webhooks.js";
 import { randomBytes, createHash } from "crypto";
 
@@ -76,9 +76,33 @@ app.post("/v1/auth/signup", async (c) => {
   for (const wd of [1, 2, 3, 4, 5]) {
     await q(`INSERT INTO schedule_rules (schedule_id, weekday, start_min, end_min) VALUES ($1,$2,540,1020)`, [sch.rows[0].id, wd]);
   }
+  // auto-accept any pending team invites for this email
+  const joined = await acceptPendingInvites(user.id, user.email);
   const token = await createSession(user.id);
-  return c.json({ token, user }, 201);
+  return c.json({ token, user, joinedTeams: joined }, 201);
 });
+
+/* Accept every valid pending invite matching an email; returns [{teamId, teamSlug, name}]. */
+async function acceptPendingInvites(userId, email) {
+  const invites = (await q(
+    `SELECT * FROM team_invites WHERE lower(email)=lower($1) AND accepted_at IS NULL AND expires_at > now()`, [email])).rows;
+  const joined = [];
+  for (const inv of invites) joined.push(await applyInvite(inv, userId));
+  return joined;
+}
+
+async function applyInvite(inv, userId) {
+  await q(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [inv.team_id, userId, inv.role]);
+  // pre-staged host assignments
+  const hostEvents = Array.isArray(inv.host_event_ids) ? inv.host_event_ids : [];
+  if (hostEvents.length) {
+    const valid = (await q(`SELECT id FROM event_types WHERE team_id=$1 AND id = ANY($2)`, [inv.team_id, hostEvents])).rows;
+    for (const et of valid) await q(`INSERT INTO event_type_hosts (event_type_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [et.id, userId]);
+  }
+  await q(`UPDATE team_invites SET accepted_at=now() WHERE id=$1`, [inv.id]);
+  const t = (await q(`SELECT slug, name FROM teams WHERE id=$1`, [inv.team_id])).rows[0];
+  return { teamId: inv.team_id, teamSlug: t?.slug, name: t?.name };
+}
 
 app.post("/v1/auth/login", async (c) => {
   const { email, password } = await c.req.json().catch(() => ({}));
@@ -404,13 +428,14 @@ app.get("/v1/teams/:id", async (c) => {
   if (!u) return err(c, 401, "Sign in required.");
   const role = await teamRole(c.req.param("id"), u.id);
   if (!role) return err(c, 404, "Team not found.");
-  const [team, members, ets] = await Promise.all([
+  const [team, members, ets, invites] = await Promise.all([
     q(`SELECT * FROM teams WHERE id=$1`, [c.req.param("id")]),
     q(`SELECT tm.role, u.id, u.name, u.email, u.username FROM team_members tm JOIN users u ON u.id=tm.user_id WHERE tm.team_id=$1 ORDER BY tm.created_at`, [c.req.param("id")]),
     q(`SELECT et.*, (SELECT array_agg(h.user_id) FROM event_type_hosts h WHERE h.event_type_id=et.id) AS host_ids
        FROM event_types et WHERE et.team_id=$1 ORDER BY et.created_at`, [c.req.param("id")]),
+    q(`SELECT id, email, role, token, host_event_ids, expires_at FROM team_invites WHERE team_id=$1 AND accepted_at IS NULL AND expires_at > now() ORDER BY created_at`, [c.req.param("id")]),
   ]);
-  return c.json({ team: { ...team.rows[0], role }, members: members.rows, eventTypes: ets.rows });
+  return c.json({ team: { ...team.rows[0], role }, members: members.rows, eventTypes: ets.rows, invites: invites.rows });
 });
 
 app.patch("/v1/teams/:id", async (c) => {
@@ -454,6 +479,100 @@ app.get("/v1/teams/:id/meetings", async (c) => {
      WHERE et.team_id=$1 AND b.start_at > now() - interval '7 days'
      ORDER BY b.start_at LIMIT 100`, [c.req.param("id")]);
   return c.json({ meetings: r.rows });
+});
+
+/* ---------------- team invites ---------------- */
+const inviteUrl = (token) => `https://from.bookii.to/app.html#/invite/${token}`;
+
+app.post("/v1/teams/:id/invites", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const teamId = c.req.param("id");
+  const role = await teamRole(teamId, u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can invite people.");
+  const b = await c.req.json().catch(() => ({}));
+  const email = (b.email || "").toLowerCase().trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err(c, 400, "Enter a valid email.");
+  const inviteRole = b.role === "admin" ? "admin" : "member";
+  // already a member?
+  const existing = (await q(
+    `SELECT tm.user_id FROM team_members tm JOIN users us ON us.id=tm.user_id WHERE tm.team_id=$1 AND lower(us.email)=$2`,
+    [teamId, email])).rows[0];
+  if (existing) return err(c, 409, "That person is already on the team.");
+  // validate host pre-stage list against this team's events
+  const hostIds = Array.isArray(b.host_event_ids) ? b.host_event_ids : [];
+  const validHosts = hostIds.length
+    ? (await q(`SELECT id FROM event_types WHERE team_id=$1 AND id = ANY($2)`, [teamId, hostIds])).rows.map(r => r.id) : [];
+  const token = randomBytes(24).toString("hex");
+  const inv = (await q(
+    `INSERT INTO team_invites (team_id, email, role, token, host_event_ids, invited_by)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (team_id, email) DO UPDATE SET
+       role=EXCLUDED.role, token=EXCLUDED.token, host_event_ids=EXCLUDED.host_event_ids,
+       invited_by=EXCLUDED.invited_by, created_at=now(), expires_at=now() + interval '7 days', accepted_at=NULL
+     RETURNING id, email, role, token, host_event_ids, expires_at`,
+    [teamId, email, inviteRole, token, JSON.stringify(validHosts), u.id])).rows[0];
+  const team = (await q(`SELECT name FROM teams WHERE id=$1`, [teamId])).rows[0];
+  sendTeamInvite(email, team.name, u.name || u.email, inviteRole, inviteUrl(inv.token)).catch(() => {});
+  return c.json({ invite: inv, url: inviteUrl(inv.token), emailSent: emailReady() }, 201);
+});
+
+app.delete("/v1/teams/:id/invites/:inviteId", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can manage invites.");
+  await q(`DELETE FROM team_invites WHERE id=$1 AND team_id=$2`, [c.req.param("inviteId"), c.req.param("id")]);
+  return c.json({ ok: true });
+});
+
+app.post("/v1/teams/:id/invites/:inviteId/resend", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const role = await teamRole(c.req.param("id"), u.id);
+  if (!["owner", "admin"].includes(role)) return err(c, 403, "Only team admins can manage invites.");
+  const inv = (await q(
+    `UPDATE team_invites SET expires_at=now() + interval '7 days' WHERE id=$1 AND team_id=$2 AND accepted_at IS NULL RETURNING *`,
+    [c.req.param("inviteId"), c.req.param("id")])).rows[0];
+  if (!inv) return err(c, 404, "Invite not found.");
+  const team = (await q(`SELECT name FROM teams WHERE id=$1`, [inv.team_id])).rows[0];
+  sendTeamInvite(inv.email, team.name, u.name || u.email, inv.role, inviteUrl(inv.token)).catch(() => {});
+  return c.json({ ok: true, url: inviteUrl(inv.token), emailSent: emailReady() });
+});
+
+/* public: view an invite (no auth) */
+app.get("/v1/invites/:token", async (c) => {
+  const inv = (await q(`SELECT * FROM team_invites WHERE token=$1`, [c.req.param("token")])).rows[0];
+  if (!inv) return c.json({ valid: false, reason: "not_found" });
+  const team = (await q(`SELECT name, slug FROM teams WHERE id=$1`, [inv.team_id])).rows[0];
+  if (inv.accepted_at) return c.json({ valid: false, reason: "accepted", team: { name: team?.name } });
+  if (new Date(inv.expires_at) < new Date()) return c.json({ valid: false, reason: "expired", team: { name: team?.name } });
+  const inviter = inv.invited_by ? (await q(`SELECT name, email FROM users WHERE id=$1`, [inv.invited_by])).rows[0] : null;
+  const hasAccount = (await q(`SELECT 1 FROM users WHERE lower(email)=lower($1)`, [inv.email])).rows.length > 0;
+  return c.json({ valid: true, email: inv.email, role: inv.role, hasAccount,
+    team: { name: team?.name, slug: team?.slug }, inviter: inviter ? (inviter.name || inviter.email) : null });
+});
+
+/* accept an invite (auth required; email must match) */
+app.post("/v1/invites/:token/accept", async (c) => {
+  const u = await requireUser(c);
+  if (!u) return err(c, 401, "Sign in required.");
+  const inv = (await q(`SELECT * FROM team_invites WHERE token=$1`, [c.req.param("token")])).rows[0];
+  if (!inv) return err(c, 404, "Invite not found.");
+  if (inv.email.toLowerCase() !== u.email.toLowerCase())
+    return err(c, 403, `This invite is for ${inv.email}. Sign in with that email to accept it.`);
+  // idempotent for the same user (server may have auto-accepted during signup)
+  if (inv.accepted_at) {
+    const member = await teamRole(inv.team_id, u.id);
+    if (member) {
+      const t = (await q(`SELECT slug, name FROM teams WHERE id=$1`, [inv.team_id])).rows[0];
+      return c.json({ ok: true, already: true, team: { teamId: inv.team_id, teamSlug: t?.slug, name: t?.name } });
+    }
+    return err(c, 409, "This invite was already used.");
+  }
+  if (new Date(inv.expires_at) < new Date()) return err(c, 410, "This invite has expired — ask for a new one.");
+  const res = await applyInvite(inv, u.id);
+  return c.json({ ok: true, team: res });
 });
 
 app.get("/v1/teams/:id/host-stats", async (c) => {

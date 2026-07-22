@@ -65,6 +65,15 @@ export async function sendReminder(bookingRow, label) {
       ${links(b)}`));
 }
 
+export async function sendTeamInvite(to, teamName, inviterName, role, url) {
+  return send(to, `${inviterName || "A teammate"} invited you to ${teamName} on Bookii`,
+    layout(`<p style="margin:0 0 4px;color:#2B3EE5;font-size:13px;font-weight:600">Team invitation</p>
+      <h2 style="font-family:Georgia,serif;margin:0 0 12px;font-size:22px">Join ${esc(teamName)}</h2>
+      <p style="font-size:15px;margin:0 0 8px">${esc(inviterName || "A teammate")} invited you to join <strong>${esc(teamName)}</strong> as ${esc(role)}. You'll share team booking pages and, if added as a host, take meetings in the rotation.</p>
+      ${btn(url, "Accept invitation")}
+      <p style="font-size:12px;color:#9a9c96;margin-top:16px">This invite expires in 7 days. If you weren't expecting it, you can ignore it.</p>`));
+}
+
 /* ------- auth emails ------- */
 export async function sendMagicLink(to, url) {
   return send(to, "Your Bookii sign-in link",

@@ -210,3 +210,17 @@ CREATE TABLE IF NOT EXISTS event_type_hosts (
 -- team event slugs must be unique per team (user_id stays the creator)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_et_team_slug ON event_types(team_id, slug) WHERE team_id IS NOT NULL;
 ALTER TABLE event_type_hosts ADD COLUMN IF NOT EXISTS paused boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS team_invites (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id        uuid NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  email          text NOT NULL,
+  role           text NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
+  token          text UNIQUE NOT NULL,
+  host_event_ids jsonb NOT NULL DEFAULT '[]',
+  invited_by     uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  expires_at     timestamptz NOT NULL DEFAULT now() + interval '7 days',
+  accepted_at    timestamptz,
+  UNIQUE (team_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_team_invites_email ON team_invites(lower(email)) WHERE accepted_at IS NULL;

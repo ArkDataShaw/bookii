@@ -47,7 +47,7 @@
   };
 
   /* ---------- router ---------- */
-  const VIEWS = ["auth", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "teams", "team", "insights", "settings", "profile", "public", "cancel"];
+  const VIEWS = ["auth", "invite", "onboarding", "dashboard", "editor", "availability", "meetings", "calendars", "teams", "team", "insights", "settings", "profile", "public", "cancel"];
   function show(view) {
     for (const v of VIEWS) $("#view-" + v).hidden = v !== view;
     const appViews = ["dashboard", "editor", "availability", "meetings", "calendars", "teams", "team", "insights", "settings"];
@@ -92,11 +92,13 @@
     if (parts[0] === "reschedule" && parts[1] && parts[2]) return renderReschedule(parts[1], parts[2]);
     if (parts[0] === "auth-token" && parts[1]) return consumeMagicLink(parts[1]);
     if (parts[0] === "reset" && parts[1]) return renderResetForm(parts[1]);
-    // authed routes
+    // resolve session before invite (which needs to know if logged in)
     if (!me) {
       const token = localStorage.getItem("bookii-token");
       if (token) { try { me = (await api("/me")).user; } catch { localStorage.removeItem("bookii-token"); } }
     }
+    if (parts[0] === "invite" && parts[1]) return renderInvite(parts[1]);
+    // authed routes
     if (!me) { renderAuth(parts[0] === "login" ? "login" : "signup"); return; }
     if (!me.username) return renderOnboarding();
     switch (parts[0]) {
@@ -130,6 +132,7 @@
     $("#auth-switch").textContent = mode === "signup" ? "Sign in" : "Create an account";
     $("#auth-error").hidden = true;
     $("#auth-info").hidden = true;
+    $("#a-email").readOnly = false;
     show("auth");
   }
   $("#auth-switch").addEventListener("click", () => renderAuth(authMode === "signup" ? "login" : "signup"));
@@ -187,6 +190,7 @@
       }
       localStorage.setItem("bookii-token", data.token);
       me = data.user;
+      if (pendingInvite) { location.hash = "#/invite/" + pendingInvite; return; }
       location.hash = "#/dashboard";
       route();
     } catch (err) {
@@ -1097,6 +1101,53 @@
       hEl.appendChild(lab);
     }
 
+    // pending invites list
+    const invEl = $("#td-invites");
+    invEl.innerHTML = "";
+    for (const inv of (d.invites || [])) {
+      const url = `https://from.bookii.to/app.html#/invite/${inv.token}`;
+      const row = document.createElement("div");
+      row.className = "tdm-row tdm-pending";
+      row.innerHTML = `<div class="tdm-top">
+          <span class="tdm-name">${esc(inv.email)}</span>
+          <span class="et-badge">${esc(inv.role)}</span>
+          <span class="et-badge tdm-warn">invite pending</span>
+        </div>
+        <p class="tdm-stats">Not yet accepted · expires ${new Date(inv.expires_at).toLocaleDateString()}</p>
+        <div class="tdm-controls">
+          <button class="linklike" data-copy>copy link</button>
+          <button class="linklike" data-resend>resend</button>
+          <button class="linklike danger" data-revoke>revoke</button>
+        </div>`;
+      row.querySelector("[data-copy]").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(url).catch(() => {}); toast("Invite link copied");
+      });
+      row.querySelector("[data-resend]").addEventListener("click", async () => {
+        const r = await api(`/teams/${id}/invites/${inv.id}/resend`, { method: "POST" }).catch(e => toast(e.message));
+        if (r) toast(r.emailSent ? "Invite re-sent" : "Invite refreshed — share the link");
+      });
+      row.querySelector("[data-revoke]").addEventListener("click", async () => {
+        if (!confirm(`Revoke the invite for ${inv.email}?`)) return;
+        await api(`/teams/${id}/invites/${inv.id}`, { method: "DELETE" }).catch(e => toast(e.message));
+        renderTeamDetail(id);
+      });
+      invEl.appendChild(row);
+    }
+
+    // invite host pre-stage checkboxes (team events)
+    const ihEl = $("#td-invite-hosts");
+    ihEl.innerHTML = "";
+    if (!d.eventTypes.length) ihEl.innerHTML = '<span class="mut small">No team events yet.</span>';
+    for (const et of d.eventTypes) {
+      const lab = document.createElement("label");
+      lab.className = "check-row small";
+      lab.innerHTML = `<input type="checkbox" value="${et.id}" checked> ${esc(et.title)}`;
+      ihEl.appendChild(lab);
+    }
+    $("#td-invite-link").hidden = true;
+    // only admins can invite
+    $(".td-invite-box").style.display = isAdmin ? "" : "none";
+
     // team event type cards
     const eEl = $("#td-ets");
     eEl.innerHTML = "";
@@ -1191,15 +1242,90 @@
   });
   $("#td-invite").addEventListener("click", async () => {
     try {
-      const r = await api(`/teams/${curTeam.team.id}/members`, { method: "POST", body: {
+      const hostEvents = [...document.querySelectorAll("#td-invite-hosts input:checked")].map(i => i.value);
+      const r = await api(`/teams/${curTeam.team.id}/invites`, { method: "POST", body: {
         email: $("#td-invite-email").value.trim(),
         role: $("#td-invite-role").value,
+        host_event_ids: hostEvents,
       }});
       $("#td-invite-email").value = "";
-      toast(`Added ${r.member.name || r.member.email}`);
+      // always surface the copyable link (email may not be live)
+      const box = $("#td-invite-link");
+      box.innerHTML = `<p class="mut small">${r.emailSent ? "Invite emailed. You can also share this link:" : "Send this link to your teammate:"}</p>
+        <code>${esc(r.url)}</code> <button class="linklike">copy</button>`;
+      box.querySelector("button").addEventListener("click", async () => {
+        await navigator.clipboard.writeText(r.url).catch(() => {});
+        toast("Invite link copied");
+      });
+      box.hidden = false;
       renderTeamDetail(curTeam.team.id);
     } catch (e) { toast(e.message); }
   });
+
+  /* ---------- invite acceptance ---------- */
+  let pendingInvite = null;
+  async function renderInvite(token) {
+    show("invite");
+    const card = $("#inv-card");
+    card.innerHTML = '<p class="mut">Loading invitation…</p>';
+    let info;
+    try { info = await api("/invites/" + encodeURIComponent(token)); }
+    catch { card.innerHTML = '<h1 class="serif">Invitation not found</h1><p class="mut">This link isn\'t valid.</p>'; return; }
+    if (!info.valid) {
+      const msg = { expired: "This invitation has expired — ask your team admin to send a new one.",
+        accepted: `This invitation to ${esc(info.team?.name || "the team")} was already used.`,
+        not_found: "This invitation link isn't valid." }[info.reason] || "This invitation isn't valid.";
+      card.innerHTML = `<h1 class="serif">Invitation</h1><p class="mut">${msg}</p>
+        ${me ? '<a class="btn btn-ghost" href="#/teams">Go to your teams</a>' : '<a class="btn btn-ghost" href="#/login">Sign in</a>'}`;
+      return;
+    }
+    // logged in, matching email → accept immediately
+    if (me && me.email.toLowerCase() === info.email.toLowerCase()) {
+      card.innerHTML = `<h1 class="serif">Joining ${esc(info.team.name)}…</h1>`;
+      try {
+        const r = await api(`/invites/${encodeURIComponent(token)}/accept`, { method: "POST" });
+        pendingInvite = null;
+        inviteSuccess(r.team);
+      } catch (e) { card.innerHTML = `<h1 class="serif">Invitation</h1><p class="form-error">${esc(e.message)}</p>`; }
+      return;
+    }
+    // logged in as someone else
+    if (me) {
+      card.innerHTML = `<h1 class="serif">Wrong account</h1>
+        <p class="mut">This invitation to <strong>${esc(info.team.name)}</strong> is for <strong>${esc(info.email)}</strong>, but you're signed in as ${esc(me.email)}.</p>
+        <button class="btn btn-primary btn-wide" id="inv-switch">Sign out &amp; continue</button>`;
+      $("#inv-switch").addEventListener("click", () => {
+        pendingInvite = token;
+        localStorage.removeItem("bookii-token"); me = null;
+        renderAuth("login");
+        $("#a-email").value = info.email;
+      });
+      return;
+    }
+    // logged out → prompt to sign up / in with locked email
+    pendingInvite = token;
+    card.innerHTML = `<p class="eyebrow">You're invited</p>
+      <h1 class="serif">Join ${esc(info.team.name)}</h1>
+      <p class="mut">${info.inviter ? esc(info.inviter) + " invited you" : "You've been invited"} to join as <strong>${esc(info.role)}</strong>, using <strong>${esc(info.email)}</strong>.</p>
+      <div class="hero-ctas" style="justify-content:flex-start;margin-top:1rem">
+        <button class="btn btn-primary" id="inv-signup">${info.hasAccount ? "Sign in to accept" : "Create account & join"}</button>
+      </div>`;
+    $("#inv-signup").addEventListener("click", () => {
+      renderAuth(info.hasAccount ? "login" : "signup");
+      $("#a-email").value = info.email;
+      $("#a-email").readOnly = true;
+    });
+  }
+  function inviteSuccess(team) {
+    const noHours = true; // new members should confirm availability
+    $("#inv-card").innerHTML = `<p class="confirmed-mark" style="margin:0 0 1rem">✓</p>
+      <h1 class="serif">You're on ${esc(team.name)}</h1>
+      <p class="mut">Welcome to the team. Set your availability so meetings can route to you, then you're in the rotation.</p>
+      <div class="hero-ctas" style="justify-content:flex-start;margin-top:1rem">
+        <a class="btn btn-primary" href="#/availability">Set my availability</a>
+        <a class="btn btn-ghost" href="#/team/${team.teamId}">View team</a>
+      </div>`;
+  }
 
   /* ---------- insights ---------- */
   const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

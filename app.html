@@ -54,6 +54,11 @@
     </div>
   </section>
 
+  <!-- INVITE ACCEPTANCE -->
+  <section id="view-invite" class="view view-narrow" hidden>
+    <div class="card auth-card" id="inv-card"></div>
+  </section>
+
   <!-- ONBOARDING -->
   <section id="view-onboarding" class="view view-narrow" hidden>
     <div class="card">
@@ -277,12 +282,17 @@
         <div class="card">
           <h3 class="card-title">Members &amp; rotation</h3>
           <div id="td-members"></div>
-          <div class="dk-new">
-            <input type="email" id="td-invite-email" placeholder="teammate@arkdata.io">
-            <select id="td-invite-role"><option value="member">Member</option><option value="admin">Admin</option></select>
-            <button class="btn btn-ghost btn-sm" id="td-invite">Add</button>
+          <div id="td-invites"></div>
+          <div class="td-invite-box">
+            <div class="dk-new">
+              <input type="email" id="td-invite-email" placeholder="teammate@arkdata.io">
+              <select id="td-invite-role"><option value="member">Member</option><option value="admin">Admin</option></select>
+            </div>
+            <p class="mut small" style="margin:.5rem 0 .3rem">Add them to the rotation on:</p>
+            <div id="td-invite-hosts" class="td-hosts"></div>
+            <button class="btn btn-primary btn-sm" id="td-invite">Send invite</button>
+            <div class="dk-secret" id="td-invite-link" hidden></div>
           </div>
-          <p class="mut small">Teammates need a Bookii account first (from.bookii.to).</p>
         </div>
         <div class="card">
           <h3 class="card-title">Team profile</h3>

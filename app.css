@@ -263,3 +263,9 @@
 .tda-day{font-family:var(--font-m);font-size:.72rem;color:var(--ink-60);width:90px;flex-shrink:0}
 .tda-none{color:var(--ink-35)}
 .tda-slots{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center}
+
+/* team invites */
+.td-invite-box{border-top:1px solid var(--rule);padding-top:.8rem;margin-top:.5rem}
+.tdm-pending{opacity:.9}
+.tdm-pending .tdm-name{color:var(--ink-60)}
+#td-invite-link code{font-family:var(--font-m);font-size:.72rem;word-break:break-all;color:#7ED9A7}
