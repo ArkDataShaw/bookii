@@ -40,6 +40,7 @@ export function weekdayInTz(dateKey, tz) {
 }
 
 export function isValidTz(tz) {
+  if (!tz || typeof tz !== "string") return false; // Intl treats undefined as "use default" — reject it
   try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; }
   catch { return false; }
 }
